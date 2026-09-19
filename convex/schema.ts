@@ -70,6 +70,8 @@ const users = defineTable({
     v.literal("suspended"),
     v.literal("deleted")
   ),
+  emailVerifiedAt: v.optional(v.number()), // email verification state — null = unverified (AUTH-PLAN.md §2)
+  passwordUpdatedAt: v.optional(v.number()), // change-password audit anchor
   lastActiveAt: v.optional(v.number()),
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -136,6 +138,61 @@ const teacherProfiles = defineTable({
 })
   .index("userId", ["userId"])
   .index("by_status", ["status"]);
+
+/* --------------- identity module: auth primitives (AUTH-PLAN.md §2) --------------- */
+const authAccounts = defineTable({
+  userId: v.id("users"),
+  provider: v.literal("password"),
+  /** Normalized email — unique-by-convention via this index. */
+  providerAccountId: v.string(),
+  /** PBKDF2 hash of the password credential (self-describing format).
+   *  Lives ONLY here, server-side — never on the public users row, never returned. */
+  secretHash: v.string(),
+  emailVerified: v.boolean(), // mirror of users.emailVerifiedAt; kept for cheap guards
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_provider_account", ["provider", "providerAccountId"]) // uniqueness lookup
+  .index("by_user", ["userId"]);
+
+const authSessions = defineTable({
+  userId: v.id("users"),
+  /** SHA-256 of the session token — the raw token is NEVER stored (database leak ≠ session theft). */
+  tokenHash: v.string(),
+  issuedAt: v.number(),
+  expiresAt: v.number(),
+  /** Server-side revocation (logout / password change / admin action) — not client-only. */
+  revokedAt: v.optional(v.number()),
+  createdAt: v.number(),
+})
+  .index("by_token_hash", ["tokenHash"]) // unique-by-convention session lookup
+  .index("by_user_time", ["userId", "createdAt"]); // revoke-all for a user
+
+const verificationTokens = defineTable({
+  purpose: v.union(v.literal("email_verify"), v.literal("password_reset")),
+  targetUserId: v.id("users"),
+  /** SHA-256 hash at rest — raw tokens exist only in the scheduled email payload. */
+  tokenHash: v.string(),
+  expiresAt: v.number(), // short-lived: 24h verify / 60min reset
+  /** Single-consume: set transactionally on use; a consumed token never re-verifies. */
+  consumedAt: v.optional(v.number()),
+  createdAt: v.number(),
+})
+  .index("by_token_hash", ["tokenHash"])
+  .index("by_user_purpose", ["targetUserId", "purpose"]);
+
+const loginAttempts = defineTable({
+  /** Pre-account identifier (normalized email) — includes attempts against unknown addresses,
+   *  so brute force cannot be tracked by "does the email exist" inference. */
+  emailNormalized: v.string(),
+  outcome: v.union(
+    v.literal("success"),
+    v.literal("bad_password"),
+    v.literal("unknown_email"),
+    v.literal("rate_limited")
+  ),
+  createdAt: v.number(),
+}).index("by_email_time", ["emailNormalized", "createdAt"]); // lockout-window lookups
 
 /* ---------------- learning module ---------------- */
 const classes = defineTable({
@@ -779,6 +836,10 @@ export default defineSchema({
   profiles,
   roles,
   teacherProfiles,
+  authAccounts,
+  authSessions,
+  verificationTokens,
+  loginAttempts,
   classes,
   moves,
   combos,
