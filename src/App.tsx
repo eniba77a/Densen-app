@@ -20,6 +20,7 @@ import Admin from "./pages/Admin";
 import Versions from "./pages/Versions";
 import Audio from "./pages/Audio";
 import Onboarding from "./pages/Onboarding";
+import Auth from "./pages/Auth";
 import { PrivacyCenter, LegalPage, SafetyCenter, BusinessPage, UnsubscribePage } from "./pages/Governance";
 
 /** GovernanceProvider sits inside StoreProvider so it can reuse the toast host. */
@@ -47,6 +48,7 @@ function Shell() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/welcome" element={<Onboarding />} />
+        <Route path="/register" element={<Auth />} />
         <Route path="/feed" element={<Feed />} />
         <Route path="/discover" element={<Discover />} />
         <Route path="/learn" element={<Learn />} />
