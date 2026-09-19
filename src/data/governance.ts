@@ -531,6 +531,8 @@ export interface AuditInput {
   cookieConsent?: CookieConsent;
   region: Region;
   dob?: string;
+  /** True when the age band is known (DOB collected this session or band persisted). */
+  ageKnown?: boolean;
   deletion?: DeletionRequest;
   business: BusinessInfo;
   reports: Report[];
@@ -601,7 +603,7 @@ export function runComplianceAudit(input: AuditInput): ChecklistItem[] {
     bi("", ""), bi("", ""));
 
   const band = ageBand(input.dob);
-  const ageOk = input.dob ? true : false;
+  const ageOk = Boolean(input.dob || input.ageKnown);
   add("age_aware", bi("Age collected once; protections applied by band", "Mosha mbledhur një herë; mbrojtjet zbatohen sipas grupit"), ageOk, false,
     bi(`Band “${bandLabel[band].en}” drives private-by-default accounts, restricted messaging/duets/discoverability and no profiling for minors. DOB itself is never displayed.`, `Grupi “${bandLabel[band].sq}” drejton llogari private sipas standardit, mesazhe/duete/zbulim të kufizuar dhe pa profilizim për të mitur. Datëlindja vetë nuk shfaqet kurrë.`),
     bi("", ""), bi("Date of birth not captured — run onboarding.", "Datëlindja nuk është mbledhur — ekzekuto hyrjen."));
