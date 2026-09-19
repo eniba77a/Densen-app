@@ -28,6 +28,15 @@ import {
 } from "../../convex/validators";
 import { appendAudit, type AuditEntry } from "../../convex/auditInternals";
 import { decideFollow, followCountDeltas } from "../../convex/social";
+import {
+  getMediaProvider,
+  isMediaConfigured,
+  isMediaKind,
+  setMediaProvider,
+  UploadLimits,
+  type MediaProvider,
+} from "../../convex/media";
+import schema from "../../convex/schema";
 import { persistableState } from "../state/governance";
 
 /* ---------------- helpers ---------------- */
@@ -284,6 +293,71 @@ describe("social: follow decision", () => {
       followeeFollowerDelta: 0,
       callerFollowingDelta: 0,
     });
+  });
+});
+
+/* ---------------- Day-1 schema completeness ---------------- */
+describe("schema foundation covers the Day-1 entity list", () => {
+  // Table names as defined in convex/schema.ts (camelCase).
+  const REQUIRED = [
+    "users", "profiles", "roles", "teacherProfiles", "posts", "videos", "comments",
+    "reactions", "follows", "savedContent", "messages", "notifications", "moves",
+    "combos", "choreographies", "classes", "courses", "lessons", "practiceSessions",
+    "challenges", "challengeParticipants", "xpTransactions", "danceCredits",
+    "creditTransactions", "achievements", "userAchievements", "streaks", "missions",
+    "userMissions", "purchases", "paymentTransactions", "refundRequests",
+    "subscriptions", "teacherPayouts", "copyrightClaims", "copyrightDisputes",
+    "reports", "moderationActions", "blocks", "consents", "privacySettings",
+    "devicePermissions", "legalDocuments", "auditLogs",
+  ] as const;
+
+  it("every required entity exists in the pushed schema", () => {
+    const defined = Object.keys((schema as unknown as { tables: Record<string, unknown> }).tables);
+    const missing = REQUIRED.filter((t) => !defined.includes(t));
+    expect(missing, `missing: ${missing.join(", ")}`).toHaveLength(0);
+  });
+
+  it("no duplicate tables were created (one definition per concept)", () => {
+    const defined = Object.keys((schema as unknown as { tables: Record<string, unknown> }).tables);
+    expect(new Set(defined).size).toBe(defined.length);
+  });
+});
+
+/* ---------------- media abstraction (not configured) ---------------- */
+describe("media storage abstraction", () => {
+  it("starts honestly not-configured and fails loudly", async () => {
+    expect(isMediaConfigured()).toBe(false);
+    expect(getMediaProvider().name).toBe("not_configured");
+    await expect(getMediaProvider().createUploadUrl({ kind: "video", userId: "u1", maxBytes: 1 })).rejects.toThrow(
+      "MEDIA_NOT_CONFIGURED:createUploadUrl"
+    );
+    await expect(getMediaProvider().createReadUrl("ref")).rejects.toThrow("MEDIA_NOT_CONFIGURED:createReadUrl");
+    await expect(getMediaProvider().deleteObject("ref")).rejects.toThrow("MEDIA_NOT_CONFIGURED:deleteObject");
+  });
+
+  it("accepts a provider registration and reports configured state", async () => {
+    const stub: MediaProvider = {
+      name: "test_stub",
+      supports: { video: true, image: true, thumbnail: true, audio: true, processed_video: true },
+      async createUploadUrl() {
+        return { uploadUrl: "https://example/upload", ref: "r1", objectKey: "k1", expiresAt: 1 };
+      },
+      async createReadUrl(ref: string) {
+        return { url: `https://example/${ref}`, expiresAt: 1 };
+      },
+      async deleteObject() {},
+    };
+    setMediaProvider(stub);
+    expect(isMediaConfigured()).toBe(true);
+    expect(getMediaProvider().name).toBe("test_stub");
+    await expect(getMediaProvider().createReadUrl("abc")).resolves.toEqual({ url: "https://example/abc", expiresAt: 1 });
+  });
+
+  it("upload limits cover every media kind; kind guard is closed", () => {
+    expect(Object.keys(UploadLimits).sort()).toEqual(["audio", "image", "processed_video", "thumbnail", "video"]);
+    expect(isMediaKind("video")).toBe(true);
+    expect(isMediaKind("hologram")).toBe(false);
+    expect(isMediaKind(42)).toBe(false);
   });
 });
 

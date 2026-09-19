@@ -9,6 +9,7 @@
  */
 
 import type * as auditInternals from "../auditInternals.js";
+import type * as media from "../media.js";
 import type * as security from "../security.js";
 import type * as social from "../social.js";
 import type * as validators from "../validators.js";
@@ -21,6 +22,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auditInternals: typeof auditInternals;
+  media: typeof media;
   security: typeof security;
   social: typeof social;
   validators: typeof validators;

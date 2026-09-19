@@ -41,7 +41,7 @@ export interface FollowDecisionInput {
 export type FollowDecision =
   | { action: "insert"; followerId: string; followeeId: string; following: true }
   | { action: "delete"; rowId: string; following: false }
-  | { action: "deny"; error: "unauthenticated" | "cannot_follow_self" | "target_unavailable" };
+  | { action: "deny"; error: "unauthenticated" | "caller_restricted" | "cannot_follow_self" | "target_unavailable" };
 
 /** Decide a follow toggle from the caller, target and existing row. Fail-closed. */
 export function decideFollow(input: FollowDecisionInput): FollowDecision {
@@ -50,6 +50,10 @@ export function decideFollow(input: FollowDecisionInput): FollowDecision {
     caller = requireUser(input.caller);
   } catch {
     return { action: "deny", error: "unauthenticated" };
+  }
+  if (caller.userStatus === "suspended") {
+    // Fail closed: restricted accounts keep no social-write privileges.
+    return { action: "deny", error: "caller_restricted" };
   }
   if (!input.followee || input.followee.status !== "active") {
     return { action: "deny", error: "target_unavailable" };
@@ -147,15 +151,18 @@ export const getPublicProfile = queryGeneric({
 export const toggleFollow = mutationGeneric({
   args: { followeeId: v.string() },
   handler: async (ctx, args) => {
-    // Identity from the server session — never from arguments.
+    // Identity from the server session — never from arguments. Role and status
+    // resolve from the caller's own row, consistent with getPublicProfile.
     const subject = (await ctx.auth.getUserIdentity())?.subject;
-    const caller: Caller | null = subject
-      ? {
-          userId: subject,
-          role: "user",
-          userStatus: "active",
-        }
-      : null;
+    let caller: Caller | null = null;
+    if (subject) {
+      const callerRow = (await ctx.db.get(subject as never)) as { status?: string } | null;
+      caller = {
+        userId: subject,
+        role: await resolveRole(ctx.db, subject),
+        userStatus: (callerRow?.status as Caller["userStatus"]) ?? "active",
+      };
+    }
 
     const followee = await ctx.db.get(args.followeeId as never);
     // Uniqueness check: fetch the caller's follow rows (bounded per user) and
