@@ -85,6 +85,8 @@ export const REPORT_PRIORITIES = ["critical", "high", "normal"] as const;
 export const DEVICE_PERMISSIONS = ["camera", "microphone", "photos", "location", "notifications"] as const;
 export const SAVE_TARGETS = ["post", "course", "lesson", "choreography", "challenge", "teacher"] as const;
 export const REACTION_TARGETS = ["post", "comment", "course"] as const;
+/** DENSEN "Energy" vocabulary — mirrors the closed union on `reactions.kind`. */
+export const REACTION_KINDS = ["fire", "hype", "gold"] as const;
 
 export const vRole = vEnum(ROLES);
 export const vAgeBand = vEnum(AGE_BANDS);
@@ -93,6 +95,7 @@ export const vVisibility = vEnum(POST_VISIBILITY);
 export const vReportPriority = vEnum(REPORT_PRIORITIES);
 export const vDevicePermission = vEnum(DEVICE_PERMISSIONS);
 export const vSaveTarget = vEnum(SAVE_TARGETS);
+export const vReactionKind = vEnum(REACTION_KINDS);
 
 /* ------------------------------------------------------------------ */
 /*                        Input format checks                          */

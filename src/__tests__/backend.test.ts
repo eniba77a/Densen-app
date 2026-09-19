@@ -23,11 +23,12 @@ import {
   publicProfileOf,
   publicPostOf,
   publicCommentOf,
+  vReactionKind,
   CAPTION_MAX,
   HANDLE_PATTERN,
 } from "../../convex/validators";
 import { appendAudit, type AuditEntry } from "../../convex/auditInternals";
-import { decideFollow, followCountDeltas } from "../../convex/social";
+import { decideFollow, followCountDeltas, decideReaction, reactionCountDelta } from "../../convex/social";
 import {
   getMediaProvider,
   isMediaConfigured,
@@ -293,6 +294,48 @@ describe("social: follow decision", () => {
       followeeFollowerDelta: 0,
       callerFollowingDelta: 0,
     });
+  });
+});
+
+/* ---------------- Energy: DENSEN reactions (fire/hype/gold) ---------------- */
+describe("social: Energy reaction decision", () => {
+  it("denies unauthenticated, suspended callers and unavailable targets", () => {
+    expect(decideReaction({ caller: null, kind: "fire", target: { status: "published" }, existingRow: null })).toEqual({
+      action: "deny",
+      error: "unauthenticated",
+    });
+    expect(
+      decideReaction({ caller: me({ userStatus: "suspended" }), kind: "fire", target: { status: "published" }, existingRow: null })
+    ).toEqual({ action: "deny", error: "caller_restricted" });
+    expect(
+      decideReaction({ caller: me(), kind: "fire", target: { status: "removed" }, existingRow: null })
+    ).toEqual({ action: "deny", error: "target_unavailable" });
+    expect(decideReaction({ caller: me(), kind: "fire", target: null, existingRow: null })).toEqual({
+      action: "deny",
+      error: "target_unavailable",
+    });
+  });
+
+  it("toggles insert/delete with consistent likeCount deltas", () => {
+    expect(decideReaction({ caller: me(), kind: "gold", target: { status: "published" }, existingRow: null })).toEqual({
+      action: "insert",
+      userId: "u_me",
+      kind: "gold",
+    });
+    expect(
+      decideReaction({ caller: me(), kind: "gold", target: { status: "published" }, existingRow: { _id: "r1" } })
+    ).toEqual({ action: "delete", rowId: "r1" });
+    expect(reactionCountDelta({ action: "insert", userId: "u", kind: "fire" })).toBe(1);
+    expect(reactionCountDelta({ action: "delete", rowId: "r" })).toBe(-1);
+    expect(reactionCountDelta({ action: "deny", error: "target_unavailable" })).toBe(0);
+  });
+
+  it("restricts the reaction vocabulary to fire/hype/gold", () => {
+    expect(vReactionKind("fire")).toBe("fire");
+    expect(vReactionKind("hype")).toBe("hype");
+    expect(vReactionKind("gold")).toBe("gold");
+    expectThrow(() => vReactionKind("like"), "expected one of");
+    expectThrow(() => vReactionKind(""), "expected one of");
   });
 });
 

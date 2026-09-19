@@ -58,6 +58,19 @@ Day-1 additive extensions (all pushed): `missions`, `userMissions`,
 `profiles.creditBalance`, `classes.priceCents`/`creditPrice`,
 `practiceSessions.attemptVideoRef`/`comparedWithUserId`.
 
+### Social vocabulary: Energy / Talk / Move-share
+
+DENSEN's social layer maps to closed, validated vocabulary rather than free strings:
+
+| Brief term | Backend realization |
+| --- | --- |
+| **Energy** | `reactions.kind` ∈ {`fire`, `hype`, `gold`} — closed union in the schema, enforced again at the boundary by `vReactionKind`; toggle semantics per (user, target, kind) with in-transaction `likeCount` consistency (`decideReaction` core + `toggleReaction` wire function) |
+| **Talk** | `comments` — moderated rows (`status` ∈ visible/hidden/removed), projected only through `publicCommentOf` |
+| **Move/share** | `posts.shareCount` — share events increment an event counter (`recordShare`); shares are events, not toggles, and the post must be published |
+
+Day-1 wire functions live in `convex/social.ts` alongside follow/profile: `toggleReaction`,
+`recordShare`, `moderationQueueCounts`.
+
 ### Credits: ledger + snapshot pattern
 
 `creditTransactions` is the auditable source of truth (signed amount +
@@ -90,8 +103,8 @@ is always performed by the payment provider — never simulated in-app.
 - `createdAt`/`updatedAt` epoch-millis on every mutable entity; ownership field
   (`ownerId`/`userId`/natural owner) on every user-created row.
 - Status fields are **closed unions** (`v.union(v.literal(...))`), never free strings.
-- Denormalized counters (`followerCount`, `likeCount`, …) are updated inside the same
-  logical operation as the edge write (see `social.ts`).
+- Denormalized counters (`followerCount`, `likeCount`, `shareCount`, …) are updated
+  inside the same logical operation as the edge write (see `social.ts`).
 - High-volume tables carry covering indexes:
   - `posts`: `by_user_status`, `by_status_created`, `by_hashtag`
   - `comments`: `by_post_status` (postId, status, createdAt)
