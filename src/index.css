@@ -237,3 +237,14 @@ label.input-label { display: block; font-weight: 700; font-size: 13px; margin: 0
 /* no scrollbar utility */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+
+/* accessibility: consistent, high-visibility keyboard focus (a11y) */
+:focus-visible {
+  outline: 2px solid var(--gold, #e3b341);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+button:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible) {
+  outline: none; /* mouse clicks keep the clean look; keyboard always shows the ring */
+}

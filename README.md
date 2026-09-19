@@ -7,7 +7,8 @@
 - React 18 + TypeScript + Vite
 - Custom CSS design system (no UI framework) — Sora/Inter, Densen gold `#e3b341` on charcoal `#0b0d10`
 - React Router (hash routing for static hosting)
-- Zero backend: everything runs on realistic mock data with `localStorage` persistence
+- Backend foundation: **Convex** (`convex/`) — 36-table schema, fail-closed security layer, PII sanitizers, append-only audit log. See **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+- Prototype state persists to `localStorage`; backend wiring lands with auth (ARCHITECTURE.md §9)
 
 ## Run
 

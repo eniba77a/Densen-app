@@ -45,7 +45,10 @@ const LS = "densen_governance_v1";
 export interface Account {
   name: string;
   email: string;
-  dob: string; // "" until onboarding collects it — never displayed publicly
+  /** Session-only. Never persisted — the derived age band persists instead (data-minimization). */
+  dob?: string;
+  /** Persisted derived age band; drives youth-safety defaults without storing the DOB. */
+  ageBand?: AgeBand;
   region: Region;
 }
 
@@ -73,7 +76,7 @@ interface Persisted {
 
 const defaults: Persisted = {
   onboarded: false,
-  account: { name: "", email: "", dob: "", region: detectRegion() },
+  account: { name: "", email: "", dob: undefined, ageBand: undefined, region: detectRegion() },
   consents: [],
   purchases: [],
   refunds: [],
@@ -96,10 +99,24 @@ function load(): Persisted {
     const raw = localStorage.getItem(LS);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<Persisted>;
-    return { ...defaults, ...parsed, account: { ...defaults.account, ...(parsed.account ?? {}) } };
+    const legacyAccount = { ...defaults.account, ...(parsed.account ?? {}) } as Account;
+    // Migration: a raw DOB must never be re-persisted. Derive the band once
+    // (preserving existing users' protections), then drop the DOB for good.
+    const band = legacyAccount.ageBand ?? ageBand(legacyAccount.dob || undefined);
+    return { ...defaults, ...parsed, account: { ...legacyAccount, dob: undefined, ageBand: band } };
   } catch {
     return defaults;
   }
+}
+
+/**
+ * Pure serializer used for persistence: strips the session-only DOB so the raw
+ * date of birth never reaches localStorage; the derived age band persists.
+ */
+export function persistableState(s: Persisted): Persisted {
+  const { account, ...rest } = s;
+  const { dob: _sessionDob, ...accountPublic } = account;
+  return { ...rest, account: accountPublic } as Persisted;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -184,7 +201,7 @@ export function GovernanceProvider({ children, toast, toasts }: { children: Reac
 
   useEffect(() => {
     try {
-      localStorage.setItem(LS, JSON.stringify(state));
+      localStorage.setItem(LS, JSON.stringify(persistableState(state)));
     } catch { /* quota */ }
   }, [state]);
 
@@ -199,7 +216,8 @@ export function GovernanceProvider({ children, toast, toasts }: { children: Reac
   }, []);
 
   const store: GovShape = useMemo(() => {
-    const band = ageBand(state.account.dob || undefined);
+    // In-session DOB wins (freshly collected); otherwise use the persisted band.
+    const band = state.account.dob ? ageBand(state.account.dob) : state.account.ageBand ?? "adult";
     const ageDefaults = ageAwareDefaults(band);
 
     const auditNow = () =>
@@ -208,6 +226,7 @@ export function GovernanceProvider({ children, toast, toasts }: { children: Reac
         cookieConsent: state.cookieConsent,
         region: state.account.region,
         dob: state.account.dob || undefined,
+        ageKnown: Boolean(state.account.dob || state.account.ageBand),
         deletion: state.deletion,
         business: state.business,
         reports: state.reports,
@@ -233,9 +252,10 @@ export function GovernanceProvider({ children, toast, toasts }: { children: Reac
           ];
           if (marketing)
             base.push({ id: rid(), userId: ME.id, type: "marketing_email", granted: true, ts, region, source: "onboarding", version: POLICY_VERSIONS.privacy });
-          return { ...s, onboarded: true, account: { name, email, dob, region }, consents: [...s.consents, ...base] };
+          return { ...s, onboarded: true, account: { name, email, dob, region, ageBand: ageBand(dob || undefined) }, consents: [...s.consents, ...base] };
         }),
-      updateAccount: (patch) => setState((s) => ({ ...s, account: { ...s.account, ...patch } })),
+      // Age immutability (spec 38): dob/ageBand cannot be rewritten after onboarding.
+      updateAccount: (patch) => setState((s) => ({ ...s, account: { ...s.account, ...patch, dob: s.account.dob, ageBand: s.account.ageBand } })),
 
       consents: state.consents,
       recordConsent,
@@ -423,7 +443,7 @@ export function GovernanceProvider({ children, toast, toasts }: { children: Reac
       },
       guardianName: state.guardianName,
       setGuardianName: (n) => setState((s) => ({ ...s, guardianName: n })),
-      dobLocked: Boolean(state.account.dob),
+      dobLocked: Boolean(state.account.dob || state.account.ageBand),
 
       toast,
       toasts,
