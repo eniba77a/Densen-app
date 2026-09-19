@@ -372,3 +372,87 @@ export function NotificationsPage() {
 }
 
 import { notifications as notifications0 } from "../data/store";
+
+/* ============================================================================
+   Day-3 backend-backed notifications (live when signed in with Convex).
+   Identity via session token; rows are non-PII; actor fields resolve through
+   public profile projections only. Falls back to the prototype feed above
+   for guests/offline preview — the same page serves both worlds honestly.
+   ========================================================================== */
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { useAuth } from "../state/auth";
+
+export function LiveNotifications() {
+  const { t } = useStore();
+  const { sessionToken, viewer } = useAuth();
+  const markRead = useMutation(api.content.markNotificationsRead);
+  const data = useQuery(
+    api.content.listNotifications,
+    sessionToken ? { sessionToken } : "skip"
+  );
+
+  if (!sessionToken || !viewer) return null;
+
+  const rows = (data && typeof data === "object" && "ok" in data && data.ok ? data.notifications : []) as
+    | { id: string; type: string; read: boolean; createdAt: number; actor?: { displayName?: string; handle?: string } | null }[]
+    | never[];
+  const unread = rows.filter((n) => !n.read);
+
+  const kindText: Record<string, string> = {
+    comment: t("notif.live.comment"),
+    follow: t("notif.live.follow"),
+    message: t("notif.live.message"),
+    reaction: t("notif.live.reaction"),
+  };
+
+  return (
+    <Page>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800 }}>{t("notifications.title")}</h1>
+        {unread.length > 0 && (
+          <button className="btn btn-ghost btn-sm" onClick={() => markRead({ sessionToken })}>
+            ✓ {t("notifications.markAll")}
+          </button>
+        )}
+      </div>
+      {rows.map((n) => (
+        <button
+          key={n.id}
+          style={{
+            display: "flex",
+            gap: 13,
+            alignItems: "center",
+            width: "100%",
+            padding: "13px 14px",
+            borderRadius: 14,
+            border: "1px solid var(--line)",
+            background: n.read ? "transparent" : "var(--gold-soft)",
+            cursor: "default",
+            color: "inherit",
+            textAlign: "left",
+            marginBottom: 8,
+          }}
+        >
+          <span style={{ width: 42, height: 42, borderRadius: "50%", background: "var(--panel-2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+            {kindText[n.type] ? "🔔" : "🔔"}
+          </span>
+          <div style={{ flex: 1, fontSize: 13.5, lineHeight: 1.5 }}>
+            {n.actor?.displayName && <strong>{n.actor.displayName} </strong>}
+            {kindText[n.type] ?? t("notif.live.generic")}
+          </div>
+          <span className="faint" style={{ fontSize: 11 }}>{new Date(n.createdAt).toLocaleDateString()}</span>
+        </button>
+      ))}
+      {rows.length === 0 && (
+        <p className="faint" style={{ textAlign: "center", marginTop: 24, fontSize: 13 }}>{t("notifications.empty")}</p>
+      )}
+    </Page>
+  );
+}
+
+/** Route switch: live backend notifications when signed in, prototype otherwise. */
+export function NotificationsRoute() {
+  const { viewer } = useAuth();
+  return viewer ? <LiveNotifications /> : <NotificationsPage />;
+}

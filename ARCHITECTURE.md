@@ -71,6 +71,27 @@ DENSEN's social layer maps to closed, validated vocabulary rather than free stri
 Day-1 wire functions live in `convex/social.ts` alongside follow/profile: `toggleReaction`,
 `recordShare`, `moderationQueueCounts`.
 
+### Safety enforcement: client preview vs server gate (Day 3)
+
+The youth-safety scanners exist twice, deliberately:
+
+| Layer | File | Role |
+| --- | --- | --- |
+| Client preview | `src/data/safety.ts` | UX feedback before submission (bilingual rule labels) |
+| Server gate | `convex/safetyCore.ts` | Authoritative enforcement on every write path (stable rule IDs) |
+
+Both share the same rules/regexes/escalations; a parity suite
+(`src/__tests__/safetyCore.test.ts`) fails if the two ever diverge. Server
+verdicts never store blocked content; hidden verdicts persist as `status:"hidden"`
+for moderation review; audit rows carry rule IDs, never user text.
+
+Wire functions in `convex/content.ts` (identity via Day-2 session token through
+`callerFromToken`): `createComment` (visibility + blocks + scan + counter +
+notification), `createPost` (server publish scan; minors never auto-published
+past review), `sendMessage` (minor-contact gate, grooming scan, contact-pattern
+watch/restrict, guardian-visible teacher threads), `listNotifications` /
+`markNotificationsRead` (non-PII rows, actor fields via public profiles only).
+
 ### Credits: ledger + snapshot pattern
 
 `creditTransactions` is the auditable source of truth (signed amount +
@@ -229,12 +250,9 @@ External integrations still required (clean integration points exist in code):
 
 ## 8b. Day-2 backlog (recommended order)
 
-1. Wire the auth provider + `ConvexClientProvider`; map JWT subject → `users` row
-   (identity module); activate the already-written guards end-to-end.
-2. Seed mutations from the existing mock dataset; swap the feed/follow client state
-   to reactive queries.
-3. Port `src/data/safety.ts` scanners into server-side write paths (comments,
-   messages, video captions) — the pure functions port 1:1.
+1. ~~Wire the auth provider + `ConvexClientProvider`; map JWT subject → `users` row~~ — **done Day 2** (session-token auth, `AuthProvider`).
+2. ~~Seed mutations from the existing mock dataset; swap the feed/follow client state to reactive queries~~ — feed/video POST seeding remains open (Day 4).
+3. ~~Port `src/data/safety.ts` scanners into server-side write paths~~ — **done Day 3** (`convex/safetyCore.ts` + `convex/content.ts`, parity-tested).
 4. Credits + XP modules on the ledger pattern (append transaction + patch denormalized
    balance in one mutation; idempotent grant lookups).
 5. Media provider implementation behind `MediaProvider` (uploads, thumbnails,
@@ -244,6 +262,9 @@ External integrations still required (clean integration points exist in code):
 7. Moderation/admin module: queue reads with `requireRole`, actions append
    `moderationActions` + audit rows.
 8. Rate limiting on public mutations (per-caller counters).
+9. Day 4: seed real posts/videos from the mock dataset; migrate the mock comment
+   and message senders onto `createComment`/`sendMessage`; surface the live
+   notification bell badge from `listNotifications`.
 
 ## 9. Future module structure (migration path)
 

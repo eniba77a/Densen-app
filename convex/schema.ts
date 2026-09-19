@@ -466,6 +466,8 @@ const messages = defineTable({
   attachmentRef: v.optional(v.string()),
   attachmentTitle: v.optional(v.string()),
   flagged: v.boolean(), // set by the grooming/contact scanner before delivery
+  /** Direct-message recipient (denormalized for minor-contact pattern analysis). */
+  recipientId: v.optional(v.id("users")),
   createdAt: v.number(),
 })
   .index("by_conversation_time", ["conversationId", "createdAt"]) // chat history

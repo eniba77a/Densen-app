@@ -12,7 +12,7 @@ import Lesson from "./pages/Lesson";
 import ProgressPage from "./pages/Progress";
 import { ChallengesPage, ChallengeDetail } from "./pages/Challenges";
 import { EventsPage, LivePage, LeaderboardsPage } from "./pages/EventsLive";
-import { MessagesPage, ChatPage, NotificationsPage } from "./pages/Messages";
+import { MessagesPage, ChatPage, NotificationsRoute } from "./pages/Messages";
 import { UserProfilePage, TeamsPage, TeamDetailPage } from "./pages/Profile";
 import Create, { Duet } from "./pages/Create";
 import Settings from "./pages/Settings";
@@ -71,7 +71,7 @@ function Shell() {
         <Route path="/leaderboards" element={<LeaderboardsPage />} />
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/messages/:convId" element={<ChatPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/notifications" element={<NotificationsRoute />} />
         <Route path="/user/:userId" element={<UserProfilePage />} />
         <Route path="/profile" element={<UserProfilePage />} />
         <Route path="/teams" element={<TeamsPage />} />

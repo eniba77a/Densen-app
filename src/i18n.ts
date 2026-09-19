@@ -226,6 +226,11 @@ const en = {
   "notifications.today": "Today",
   "notifications.earlier": "Earlier",
   "notifications.empty": "You're all caught up.",
+  "notif.live.comment": "commented on your post.",
+  "notif.live.follow": "started following you.",
+  "notif.live.message": "sent you a message.",
+  "notif.live.reaction": "reacted to your post.",
+  "notif.live.generic": "sent you a notification.",
 
   "events.title": "Events",
   "events.subtitle": "Workshops, competitions and live moments.",
@@ -1058,6 +1063,11 @@ const sq: Record<TKey, string> = {
   "notifications.today": "Sot",
   "notifications.earlier": "Më herët",
   "notifications.empty": "Gjithçka e lexuar.",
+  "notif.live.comment": "komentoi në postimin tuaj.",
+  "notif.live.follow": "filloi t'ju ndjekë.",
+  "notif.live.message": "ju dërgoi një mesazh.",
+  "notif.live.reaction": "reagoi ndaj postimit tuaj.",
+  "notif.live.generic": "ju dërgoi një njoftim.",
 
   "events.title": "Evente",
   "events.subtitle": "Workshope, gara dhe momente live.",
