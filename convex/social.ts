@@ -26,7 +26,7 @@ import {
   type Caller,
   type Role,
 } from "./security";
-import { publicProfileOf, type PublicProfileDTO } from "./validators";
+import { publicProfileOf, vReactionKind, type PublicProfileDTO } from "./validators";
 
 /* ================================================================== */
 /*                          Pure decision cores                       */
@@ -65,9 +65,7 @@ export function decideFollow(input: FollowDecisionInput): FollowDecision {
     return { action: "delete", rowId: input.existingRow._id, following: false };
   }
   return { action: "insert", followerId: caller.userId, followeeId: input.followee.userId, following: true };
-}
-
-/** Counter deltas to apply to `profiles` after a follow insert/delete. */
+}/** Counter deltas to apply to `profiles` after a follow insert/delete. */
 export function followCountDeltas(decision: FollowDecision): {
   followeeFollowerDelta: number;
   callerFollowingDelta: number;
@@ -75,6 +73,56 @@ export function followCountDeltas(decision: FollowDecision): {
   if (decision.action === "insert") return { followeeFollowerDelta: 1, callerFollowingDelta: 1 };
   if (decision.action === "delete") return { followeeFollowerDelta: -1, callerFollowingDelta: -1 };
   return { followeeFollowerDelta: 0, callerFollowingDelta: 0 };
+}
+
+/* ---------------- Energy: DENSEN reactions (fire/hype/gold) ---------------- */
+
+export const ENERGY_KINDS = ["fire", "hype", "gold"] as const;
+export type EnergyKind = (typeof ENERGY_KINDS)[number];
+
+export interface ReactionDecisionInput {
+  caller: Caller | null;
+  /** Closed vocabulary — the wire layer validates before calling this core. */
+  kind: EnergyKind;
+  /** The post/comment/course row, as visible server-side. */
+  target: { status: string } | null;
+  /** Existing reaction row for (user, target, kind) — uniqueness input. */
+  existingRow: { _id: string } | null;
+}
+
+export type ReactionDecision =
+  | { action: "insert"; userId: string; kind: EnergyKind }
+  | { action: "delete"; rowId: string }
+  | { action: "deny"; error: "unauthenticated" | "caller_restricted" | "target_unavailable" };
+
+/**
+ * Decide an Energy reaction toggle. Fail-closed: no session, suspended caller,
+ * or unavailable target denies. One row per (user, target, kind); toggling the
+ * same kind again removes it (switching kinds requires two toggles by design —
+ * explicit, auditable, no silent mutation of another user's reaction row).
+ */
+export function decideReaction(input: ReactionDecisionInput): ReactionDecision {
+  let caller: Caller;
+  try {
+    caller = requireUser(input.caller);
+  } catch {
+    return { action: "deny", error: "unauthenticated" };
+  }
+  if (caller.userStatus === "suspended") {
+    return { action: "deny", error: "caller_restricted" };
+  }
+  if (!input.target || input.target.status !== "published") {
+    return { action: "deny", error: "target_unavailable" };
+  }
+  if (input.existingRow) return { action: "delete", rowId: input.existingRow._id };
+  return { action: "insert", userId: caller.userId, kind: input.kind };
+}
+
+/** likeCount delta on the target post for a reaction decision. */
+export function reactionCountDelta(decision: ReactionDecision): number {
+  if (decision.action === "insert") return 1;
+  if (decision.action === "delete") return -1;
+  return 0;
 }
 
 /* ================================================================== */
@@ -220,6 +268,106 @@ export const toggleFollow = mutationGeneric({
   },
 });
 
+/**
+ * Energy: toggle a DENSEN reaction (fire/hype/gold) on a published post.
+ * Identity from session; closed-vocabulary validation at the boundary;
+ * uniqueness via `by_user_target`; likeCount kept consistent in-transaction.
+ */
+export const toggleReaction = mutationGeneric({
+  args: {
+    postId: v.string(),
+    kind: v.string(), // closed union enforced via vReactionKind below
+  },
+  handler: async (ctx, args) => {
+    // Boundary validation — unknown reaction kinds never reach the core.
+    const kind = vReactionKind(args.kind);
+
+    const subject = (await ctx.auth.getUserIdentity())?.subject;
+    let caller: Caller | null = null;
+    if (subject) {
+      const callerRow = (await ctx.db.get(subject as never)) as { status?: string } | null;
+      caller = {
+        userId: subject,
+        role: await resolveRole(ctx.db, subject),
+        userStatus: (callerRow?.status as Caller["userStatus"]) ?? "active",
+      };
+    }
+
+    const post = await ctx.db.get(args.postId as never);
+    const target = post ? { status: post.status } : null;
+
+    // Uniqueness: fetch the caller's reaction rows (bounded per user) and match
+    // target+kind in memory — the generic builder cannot chain composite index
+    // equality; generated code would use `by_user_target` fully.
+    const myReactions = (await ctx.db
+      .query("reactions")
+      .withIndex("by_user_target", (q) => q.eq("userId", (caller?.userId ?? "") as never))
+      .collect()) as { _id: string; targetId: string; kind: string; targetType: string }[];
+    const existing =
+      myReactions.find((r) => r.targetType === "post" && r.targetId === args.postId && r.kind === kind) ?? null;
+
+    const decision = decideReaction({
+      caller,
+      kind,
+      target,
+      existingRow: existing ? { _id: existing._id as string } : null,
+    });
+    if (decision.action === "deny") return { ok: false as const, error: decision.error };
+
+    if (decision.action === "delete") {
+      await ctx.db.delete(decision.rowId as never);
+    } else {
+      await ctx.db.insert("reactions", {
+        userId: decision.userId as never,
+        targetType: "post",
+        targetId: args.postId,
+        kind: decision.kind,
+        createdAt: Date.now(),
+      });
+    }
+
+    // likeCount consistency in the same logical operation.
+    const delta = reactionCountDelta(decision);
+    if (delta !== 0 && post) {
+      await ctx.db.patch(post._id, {
+        likeCount: Math.max(0, post.likeCount + delta),
+        updatedAt: Date.now(),
+      });
+    }
+
+    return { ok: true as const, active: decision.action === "insert" };
+  },
+});
+
+/**
+ * Move/share: record a share of a published post (shares are events, not
+ * toggles — each share increments the counter). Identity required.
+ */
+export const recordShare = mutationGeneric({
+  args: { postId: v.string() },
+  handler: async (ctx, args) => {
+    const subject = (await ctx.auth.getUserIdentity())?.subject;
+    let callerStatus: Caller["userStatus"] = "active";
+    if (subject) {
+      const callerRow = (await ctx.db.get(subject as never)) as { status?: string } | null;
+      if (callerRow?.status) callerStatus = callerRow.status as Caller["userStatus"];
+    }
+    requireUser(
+      subject
+        ? { userId: subject, role: await resolveRole(ctx.db, subject), userStatus: callerStatus }
+        : null
+    );
+
+    const post = await ctx.db.get(args.postId as never);
+    if (!post || post.status !== "published") {
+      return { ok: false as const, error: "target_unavailable" };
+    }
+    const shareCount = post.shareCount + 1;
+    await ctx.db.patch(post._id, { shareCount, updatedAt: Date.now() });
+    return { ok: true as const, shareCount };
+  },
+});
+
 /** Staff-only moderation queue counts (moderator+, fail-closed). */
 export const moderationQueueCounts = queryGeneric({
   args: {},
@@ -250,4 +398,11 @@ async function resolveRole(db: DbLike, userId: string): Promise<Role> {
   return user?.role ?? "user";
 }
 
-export const __internals = { decideFollow, followCountDeltas, canViewProfile, roleAtLeast };
+export const __internals = {
+  decideFollow,
+  followCountDeltas,
+  decideReaction,
+  reactionCountDelta,
+  canViewProfile,
+  roleAtLeast,
+};

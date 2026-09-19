@@ -263,6 +263,8 @@ const posts = defineTable({
   status: publishStatus,
   likeCount: v.number(),
   commentCount: v.number(),
+  /** "Move/share" layer: times the post was shared out of DENSEN. */
+  shareCount: v.number(),
   viewCount: v.number(),
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -293,7 +295,10 @@ const reactions = defineTable({
   userId: v.id("users"),
   targetType: v.union(v.literal("post"), v.literal("comment"), v.literal("course")),
   targetId: v.string(),
-  kind: v.string(), // DENSEN social reaction vocabulary ("fire", "hype", "gold"…)
+  // DENSEN social vocabulary (Energy layer): "fire" | "hype" | "gold".
+  // Closed union — unknown reaction kinds are rejected at the boundary
+  // (see validators.vReactionKind), never silently stored.
+  kind: v.union(v.literal("fire"), v.literal("hype"), v.literal("gold")),
   createdAt: v.number(),
 })
   .index("by_target", ["targetType", "targetId"]) // count per target
