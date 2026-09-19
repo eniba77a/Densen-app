@@ -21,6 +21,9 @@ import Versions from "./pages/Versions";
 import Audio from "./pages/Audio";
 import Onboarding from "./pages/Onboarding";
 import Auth from "./pages/Auth";
+import { AuthGate, Login, Forgot, Reset, VerifyEmail } from "./pages/AuthFlow";
+import Account from "./pages/Account";
+import AdminVerification from "./pages/AdminVerification";
 import { PrivacyCenter, LegalPage, SafetyCenter, BusinessPage, UnsubscribePage } from "./pages/Governance";
 
 /** GovernanceProvider sits inside StoreProvider so it can reuse the toast host. */
@@ -49,6 +52,12 @@ function Shell() {
         <Route path="/" element={<Home />} />
         <Route path="/welcome" element={<Onboarding />} />
         <Route path="/register" element={<Auth />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/forgot" element={<AuthGate><Forgot /></AuthGate>} />
+        <Route path="/reset-password" element={<AuthGate><Reset /></AuthGate>} />
+        <Route path="/verify-email" element={<AuthGate><VerifyEmail /></AuthGate>} />
+        <Route path="/account" element={<Account />} />
+        <Route path="/admin/verification" element={<AdminVerification />} />
         <Route path="/feed" element={<Feed />} />
         <Route path="/discover" element={<Discover />} />
         <Route path="/learn" element={<Learn />} />

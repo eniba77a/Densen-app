@@ -214,3 +214,106 @@ describe("login throttling core", () => {
     expect(isLockedOut(LOCKOUT_THRESHOLD, 10_000 + 15 * 60 * 1000, 10_000)).toBe(false);
   });
 });
+
+/* ======================== Day 2: sessions & flows ======================== */
+
+import {
+  SESSION_TTL_MS,
+  SESSION_RENEW_AFTER_MS,
+  sessionValid,
+  sessionRenewFrom,
+  decideSignIn,
+  tokenConsumable,
+  decideChangePassword,
+  validateProfileEdit,
+  decideVerification,
+} from "../../convex/sessionsInternals";
+
+const CRED_ACTIVE = {
+  secretHash: "h$1$abc$def",
+  emailVerified: true,
+  userStatus: "active" as const,
+  emailVerifiedAt: 1,
+  userPasswordUpdatedAt: 1,
+};
+
+describe("session lifecycle core", () => {
+  it("validates unrevoked, unexpired sessions only", () => {
+    expect(sessionValid({ expiresAt: 1000 }, 999)).toBe(true);
+    expect(sessionValid({ expiresAt: 1000 }, 1000)).toBe(false);
+    expect(sessionValid({ expiresAt: 2000, revokedAt: 1500 }, 1600)).toBe(false);
+  });
+  it("renews old sessions, leaves fresh ones alone", () => {
+    expect(sessionRenewFrom({ issuedAt: 0 }, SESSION_RENEW_AFTER_MS + 1)).toBe(SESSION_RENEW_AFTER_MS + 1 + SESSION_TTL_MS);
+    expect(sessionRenewFrom({ issuedAt: 0 }, 1000)).toBeUndefined();
+  });
+  it("decides sign-in: credential path and account-state denies", () => {
+    expect(decideSignIn(true, CRED_ACTIVE, { failures: 0 }, 100)).toEqual({ ok: true });
+    expect(decideSignIn(false, CRED_ACTIVE, { failures: 0 }, 100)).toEqual({ ok: false, reason: "bad_password" });
+    expect(decideSignIn(true, null, { failures: 0 }, 100)).toEqual({ ok: false, reason: "no_account" });
+    expect(decideSignIn(true, { ...CRED_ACTIVE, userStatus: "suspended" }, { failures: 0 }, 100)).toEqual({ ok: false, reason: "account_suspended" });
+    expect(decideSignIn(true, { ...CRED_ACTIVE, userStatus: "deleted" }, { failures: 0 }, 100)).toEqual({ ok: false, reason: "account_deleted" });
+  });
+  it("lockout wins over everything (checked before account state)", () => {
+    const res = decideSignIn(true, CRED_ACTIVE, { failures: 5, lastFailureAt: 100 }, 200);
+    expect(res).toEqual({ ok: false, reason: "locked" });
+  });
+  it("tokens are single-consume", () => {
+    const row = { tokenHash: "h", expiresAt: 1000 };
+    expect(tokenConsumable(row, 999)).toBe(true);
+    expect(tokenConsumable(row, 1000)).toBe(false);
+    expect(tokenConsumable({ ...row, consumedAt: 1 }, 999)).toBe(false);
+    expect(tokenConsumable(undefined, 999)).toBe(false);
+  });
+});
+
+describe("change password core", () => {
+  it("requires the correct current password", () => {
+    expect(decideChangePassword(false, "NewPass2026", "OldPass2026")).toEqual({ ok: false, error: "wrong_current" });
+  });
+  it("rejects the same password and policy violations", () => {
+    expect(decideChangePassword(true, "SamePass2026", "SamePass2026")).toEqual({ ok: false, error: "same_password" });
+    expect(decideChangePassword(true, "short1", "OldPass2026")).toEqual({ ok: false, error: "policy" });
+    expect(decideChangePassword(true, "NewPass2026", "OldPass2026")).toEqual({ ok: true });
+  });
+});
+
+describe("profile edit core (owner fields + minor clamping)", () => {
+  it("validates and cleans adult edits", () => {
+    const r = validateProfileEdit({ displayName: " Era ", bio: "hello", level: "advanced", styles: ["hip hop", " ballet "] }, false);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.cleaned.displayName).toBe("Era");
+      expect(r.cleaned.styles).toEqual(["hip hop", "ballet"]);
+    }
+  });
+  it("rejects bad values", () => {
+    expect(validateProfileEdit({ displayName: "   " }, false)).toEqual({ ok: false, error: "display_name" });
+    expect(validateProfileEdit({ level: "legend" }, false)).toEqual({ ok: false, error: "level" });
+    expect(validateProfileEdit({ bio: "x".repeat(281) }, false)).toEqual({ ok: false, error: "bio" });
+    expect(validateProfileEdit({}, false)).toEqual({ ok: false, error: "empty" });
+  });
+  it("minors can never loosen privacy or reuse settings", () => {
+    const r = validateProfileEdit({ isPrivate: false, allowDuet: true, allowRemix: true, allowDownloads: true }, true);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.cleaned.isPrivate).toBe(true); // clamped
+      expect(r.cleaned.allowDuet).toBe(false); // clamped
+      expect(r.cleaned.allowRemix).toBe(false);
+      expect(r.cleaned.allowDownloads).toBe(false);
+    }
+  });
+  it("minors cannot set a city (data minimization — rejected, not dropped)", () => {
+    expect(validateProfileEdit({ city: "Tirana" }, true)).toEqual({ ok: false, error: "city" });
+  });
+});
+
+describe("teacher verification state machine", () => {
+  it("transitions only from pending", () => {
+    expect(decideVerification("pending", "approve")).toEqual({ ok: true, next: "verified" });
+    expect(decideVerification("pending", "reject")).toEqual({ ok: true, next: "rejected" });
+    expect(decideVerification("verified", "approve")).toEqual({ ok: false, error: "invalid_state" });
+    expect(decideVerification("rejected", "approve")).toEqual({ ok: false, error: "invalid_state" });
+    expect(decideVerification("revoked", "approve")).toEqual({ ok: false, error: "invalid_state" });
+  });
+});
