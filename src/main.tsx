@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
+import { AuthProvider } from "./state/auth";
 import App from "./App";
 import "./index.css";
 
@@ -20,7 +21,9 @@ const convex = VITE_CONVEX_URL ? new ConvexReactClient(VITE_CONVEX_URL) : null;
 const app = (
   <React.StrictMode>
     <HashRouter>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </HashRouter>
   </React.StrictMode>
 );

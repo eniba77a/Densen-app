@@ -8,11 +8,14 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as auditInternals from "../auditInternals.js";
 import type * as auth from "../auth.js";
 import type * as authInternals from "../authInternals.js";
 import type * as media from "../media.js";
+import type * as profiles from "../profiles.js";
 import type * as security from "../security.js";
+import type * as sessionsInternals from "../sessionsInternals.js";
 import type * as social from "../social.js";
 import type * as validators from "../validators.js";
 
@@ -23,11 +26,14 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   auditInternals: typeof auditInternals;
   auth: typeof auth;
   authInternals: typeof authInternals;
   media: typeof media;
+  profiles: typeof profiles;
   security: typeof security;
+  sessionsInternals: typeof sessionsInternals;
   social: typeof social;
   validators: typeof validators;
 }>;

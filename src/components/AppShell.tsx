@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { conversations, notifications } from "../data/store";
 import { ME, useStore } from "../state/store";
+import { useAuth } from "../state/auth";
 import { Avatar, Logo, ToastHost } from "./ui";
 import {
   IcBell,
@@ -96,8 +97,28 @@ function TopBar() {
         <button onClick={() => nav("/profile")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
           <Avatar src={ME.avatar} size={34} ring />
         </button>
+        <AuthStatus />
       </div>
     </header>
+  );
+}
+
+/** Real authentication state in the chrome: account chip when signed in, sign-in link when not. */
+function AuthStatus() {
+  const { t } = useStore();
+  const nav = useNavigate();
+  const { viewer } = useAuth();
+  if (!viewer) {
+    return (
+      <button className="btn" style={{ padding: "6px 12px", fontSize: 12.5 }} onClick={() => nav("/login?returnTo=%2Faccount")}>
+        {t("login.submit")}
+      </button>
+    );
+  }
+  return (
+    <button className="chip active" style={{ cursor: "pointer" }} onClick={() => nav("/account")} title={t("account.title")}>
+      @{viewer.handle ?? t("account.title")}
+    </button>
   );
 }
 
