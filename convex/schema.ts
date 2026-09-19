@@ -95,6 +95,9 @@ const profiles = defineTable({
   allowDownloads: v.boolean(),
   followerCount: v.number(), // denormalized counters, updated transactionally
   followingCount: v.number(),
+  /** Dance Credits balance — denormalized from creditTransactions (source of truth).
+   *  Updated in the same mutation that appends a credit transaction. */
+  creditBalance: v.number(),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
@@ -142,6 +145,10 @@ const classes = defineTable({
   difficulty: v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced")),
   coverUrl: v.string(),
   altText: v.string(), // accessibility: every media row ships alt text
+  /** Free vs paid classes: priceCents 0 = free; creditPrice enables
+   *  Dance-Credit unlocking without touching the money rails. */
+  priceCents: v.number(),
+  creditPrice: v.number(),
   status: publishStatus,
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -210,6 +217,11 @@ const practiceSessions = defineTable({
   mode: v.union(v.literal("watch"), v.literal("learn"), v.literal("practice"), v.literal("complete")),
   seconds: v.number(),
   completed: v.boolean(),
+  /** Practice-tool future: attempt video stored by reference (media module),
+   *  moderation-gated, never the file itself. */
+  attemptVideoRef: v.optional(v.string()),
+  /** Future teacher/student comparison attaches to a session. */
+  comparedWithUserId: v.optional(v.id("users")),
   createdAt: v.number(),
 })
   .index("by_user_lesson", ["userId", "lessonId"])
@@ -453,6 +465,36 @@ const danceCredits = defineTable({
   createdAt: v.number(),
 }).index("by_user_time", ["userId", "createdAt"]);
 
+/**
+ * Credit transactions — the durable, auditable double-entry for Dance Credits.
+ * `danceCredits` rows remain the ledger of individual grants; every mutation of a
+ * user's balance ALSO writes one row here with the resulting balance snapshot, so
+ * balances can be verified and disputes can be reconstructed. Balance reads use
+ * `profiles.creditBalance` (denormalized); this table is the source of truth.
+ */
+const creditTransactions = defineTable({
+  userId: v.id("users"),
+  amount: v.number(), // signed
+  /** Balance AFTER applying this transaction (audit/reconciliation snapshot). */
+  balanceAfter: v.number(),
+  reason: v.union(
+    v.literal("earn"),
+    v.literal("purchase"),
+    v.literal("spend"),
+    v.literal("reward"),
+    v.literal("refund"),
+    v.literal("expire"),
+    v.literal("admin_adjust")
+  ),
+  refType: v.optional(v.string()), // mission | purchase | challenge | class_unlock …
+  refId: v.optional(v.string()),
+  /** Idempotency: one grant per (reason, ref) per user — enforced by
+   *  read-before-write on this index in the credits module. */
+  createdAt: v.number(),
+})
+  .index("by_user_time", ["userId", "createdAt"])
+  .index("by_user_reason_ref", ["userId", "reason", "refId"]);
+
 const achievements = defineTable({
   code: v.string(), // unique-by-convention, e.g. "first_class"
   title: v.string(),
@@ -480,6 +522,34 @@ const streaks = defineTable({
   createdAt: v.number(),
   updatedAt: v.number(),
 }).index("by_user", ["userId"]);
+
+/* ---------------- arcade: missions (goal-shaped XP/credit rewards) ---------------- */
+const missions = defineTable({
+  code: v.string(), // unique-by-convention, e.g. "week1_watch_3_lessons"
+  title: v.string(),
+  description: v.string(),
+  /** Human-readable completion rule; evaluation is server-side. */
+  criteria: v.string(),
+  xpReward: v.number(),
+  creditReward: v.number(),
+  startsAt: v.optional(v.number()),
+  endsAt: v.optional(v.number()), // undefined = evergreen mission
+  status: v.union(v.literal("draft"), v.literal("active"), v.literal("retired")),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+}).index("by_status_window", ["status", "endsAt"]);
+
+const userMissions = defineTable({
+  userId: v.id("users"),
+  missionId: v.id("missions"),
+  progress: v.number(), // 0-100
+  completedAt: v.optional(v.number()),
+  claimedAt: v.optional(v.number()), // reward grant is idempotent via this field
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_user", ["userId"])
+  .index("by_user_mission", ["userId", "missionId"]); // uniqueness lookup
 
 /* ---------------- commercial module ---------------- */
 const purchases = defineTable({
@@ -525,6 +595,54 @@ const subscriptions = defineTable({
   .index("by_user", ["userId"])
   .index("by_provider_ref", ["providerRef"]);
 
+const paymentTransactions = defineTable({
+  /** Provider-authoritative money event log. `purchases` mirror readable state;
+   *  every state change arrives here first via an authenticated, signature-verified
+   *  webhook (raw-body HMAC + timestamp tolerance — see ARCHITECTURE.md §6).
+   */
+  provider: v.string(), // "stripe" | "apple" | "google"
+  /** Provider event id — the webhook idempotency key. */
+  providerEventRef: v.string(),
+  purchaseId: v.optional(v.id("purchases")),
+  userId: v.optional(v.id("users")), // denormalized for fast user-scoped reads
+  kind: v.union(
+    v.literal("charge"),
+    v.literal("refund"),
+    v.literal("chargeback"),
+    v.literal("payout")
+  ),
+  amountCents: v.number(), // signed from the platform's perspective
+  currency: v.string(),
+  rawStatus: v.string(), // provider's own status string, preserved for reconciliation
+  createdAt: v.number(),
+})
+  .index("by_provider_event", ["provider", "providerEventRef"]) // webhook idempotency
+  .index("by_purchase", ["purchaseId"])
+  .index("by_user_time", ["userId", "createdAt"]);
+
+const refundRequests = defineTable({
+  /** User-visible refund requests. The actual money movement is performed by the
+   *  payment provider after staff review — never simulated in-app (no fake refunds).
+   */
+  purchaseId: v.id("purchases"),
+  userId: v.id("users"),
+  reason: v.string(),
+  status: v.union(
+    v.literal("requested"),
+    v.literal("under_review"),
+    v.literal("approved"),
+    v.literal("refunded"),
+    v.literal("rejected")
+  ),
+  reviewedBy: v.optional(v.id("users")),
+  providerRefundRef: v.optional(v.string()), // filled only after the provider confirms
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_purchase", ["purchaseId"])
+  .index("by_status_time", ["status", "createdAt"])
+  .index("by_user", ["userId"]);
+
 const teacherPayouts = defineTable({
   teacherUserId: v.id("users"),
   amountCents: v.number(),
@@ -543,6 +661,18 @@ const teacherPayouts = defineTable({
 }).index("by_teacher", ["teacherUserId", "createdAt"]);
 
 /* ---------------- governance module ---------------- */
+const blocks = defineTable({
+  /** User-initiated block. All message/comment/recommendation paths must honor it
+   *  (the messaging gate in src/data/safety.ts already treats blocks as absolute).
+   */
+  blockerId: v.id("users"),
+  blockedId: v.id("users"),
+  reason: v.optional(v.string()),
+  createdAt: v.number(),
+})
+  .index("by_blocker", ["blockerId", "blockedId"]) // uniqueness + isBlocked lookups
+  .index("by_blocked", ["blockedId"]); // reverse lookup
+
 const reports = defineTable({
   reporterId: v.id("users"),
   targetType: v.union(
@@ -660,6 +790,7 @@ export default defineSchema({
   copyrightClaims,
   copyrightDisputes,
   moderationActions,
+  blocks,
   conversations,
   messages,
   notifications,
@@ -667,10 +798,15 @@ export default defineSchema({
   challengeParticipants,
   xpTransactions,
   danceCredits,
+  creditTransactions,
   achievements,
   userAchievements,
   streaks,
+  missions,
+  userMissions,
   purchases,
+  paymentTransactions,
+  refundRequests,
   subscriptions,
   teacherPayouts,
   reports,
