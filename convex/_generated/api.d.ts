@@ -22,6 +22,8 @@ import type * as security from "../security.js";
 import type * as sessionsInternals from "../sessionsInternals.js";
 import type * as social from "../social.js";
 import type * as validators from "../validators.js";
+import type * as videoInternals from "../videoInternals.js";
+import type * as videos from "../videos.js";
 
 import type {
   ApiFromModules,
@@ -44,6 +46,8 @@ declare const fullApi: ApiFromModules<{
   sessionsInternals: typeof sessionsInternals;
   social: typeof social;
   validators: typeof validators;
+  videoInternals: typeof videoInternals;
+  videos: typeof videos;
 }>;
 
 /**
