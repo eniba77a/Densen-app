@@ -13,6 +13,8 @@ import ProgressPage from "./pages/Progress";
 import { ChallengesPage, ChallengeDetail } from "./pages/Challenges";
 import { EventsPage, LivePage, LeaderboardsPage } from "./pages/EventsLive";
 import { MessagesPage, ChatPage, NotificationsRoute } from "./pages/Messages";
+import PrivacyCenterLive from "./pages/PrivacyCenterLive";
+import { useAuth } from "./state/auth";
 import { UserProfilePage, TeamsPage, TeamDetailPage } from "./pages/Profile";
 import Create, { Duet } from "./pages/Create";
 import Settings from "./pages/Settings";
@@ -25,6 +27,12 @@ import { AuthGate, Login, Forgot, Reset, VerifyEmail } from "./pages/AuthFlow";
 import Account from "./pages/Account";
 import AdminVerification from "./pages/AdminVerification";
 import { PrivacyCenter, LegalPage, SafetyCenter, BusinessPage, UnsubscribePage } from "./pages/Governance";
+
+/** Signed-in users get the server-backed Privacy Center; guests keep the hub. */
+function PrivacyRoute() {
+  const { viewer } = useAuth();
+  return viewer ? <PrivacyCenterLive /> : <PrivacyCenter />;
+}
 
 /** GovernanceProvider sits inside StoreProvider so it can reuse the toast host. */
 function Providers({ children }: { children: React.ReactNode }) {
@@ -83,7 +91,7 @@ function Shell() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/audio" element={<Audio />} />
         <Route path="/legal/:docId" element={<LegalPage />} />
-        <Route path="/privacy" element={<PrivacyCenter />} />
+        <Route path="/privacy" element={<PrivacyRoute />} />
         <Route path="/safety" element={<SafetyCenter />} />
         <Route path="/business" element={<BusinessPage />} />
         <Route path="/unsubscribe" element={<UnsubscribePage />} />

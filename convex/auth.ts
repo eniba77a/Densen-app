@@ -42,6 +42,7 @@ import {
   ageBandFromDob,
   LOCKOUT_WINDOW_MS,
 } from "./authInternals";
+import { SIGNUP_CONSENT_VERSIONS } from "./privacyInternals";
 import {
   SESSION_TTL_MS,
   sessionValid,
@@ -66,6 +67,11 @@ const SignUpArgs = v.object({
   wantsTeacher: v.boolean(),
   guardianName: v.optional(v.string()),
   city: v.optional(v.string()),
+  /** REQUIRED legal acceptances (separate checkboxes client-side). Fail-closed:
+   *  an account cannot be created without all three granted. */
+  acceptedTerms: v.boolean(),
+  acceptedPrivacy: v.boolean(),
+  acceptedGuidelines: v.boolean(),
 });
 
 export const signUp = mutationGeneric({
@@ -76,6 +82,9 @@ export const signUp = mutationGeneric({
     // ---- 1. Boundary validation (shape, cheap rejects before any DB read) ----
     const email = normalizeEmail(args.email);
     if (email.length > 254) return { ok: false as const, error: "invalid_email" };
+    if (!args.acceptedTerms || !args.acceptedPrivacy || !args.acceptedGuidelines) {
+      return { ok: false as const, error: "consent_required" };
+    }
 
     // ---- 2. Server-side uniqueness lookups (index-backed, in-transaction) ----
     const existingByEmail = await ctx.db
@@ -106,6 +115,18 @@ export const signUp = mutationGeneric({
     const profileId = await ctx.db.insert("profiles", { ...rows.profile, userId: userId as never });
     await ctx.db.insert("privacySettings", { ...rows.privacy, userId: userId as never });
     await ctx.db.insert("authAccounts", { ...rows.account, secretHash, userId: userId as never });
+
+    // Required consent records (user, type, version, timestamp) — one row per
+    // document, version pinned SERVER-side, same transaction as the account.
+    const consentBase = {
+      userId: userId as never,
+      granted: true,
+      region: "app",
+      source: "registration",
+    };
+    await ctx.db.insert("consents", { ...consentBase, type: "terms", version: SIGNUP_CONSENT_VERSIONS.terms, createdAt: now.getTime() });
+    await ctx.db.insert("consents", { ...consentBase, type: "privacy", version: SIGNUP_CONSENT_VERSIONS.privacy, createdAt: now.getTime() });
+    await ctx.db.insert("consents", { ...consentBase, type: "guidelines", version: SIGNUP_CONSENT_VERSIONS.guidelines, createdAt: now.getTime() });
 
     // Teacher INTENT: a `pending` row only. No teacher role is granted here —
     // admin verification (AUTH-PLAN.md §3 admin.ts) is the only path to the role.

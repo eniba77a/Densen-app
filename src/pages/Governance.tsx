@@ -112,6 +112,8 @@ export function SafetyCenter() {
         <LinkRow to="/legal/copyright" icon="©️" label={DOCS.copyright.title[lang]} />
         <LinkRow to="/challenges" icon="🏆" label={t("gov.safety.reportChallenge")} sub={t("gov.safety.reportChallengeSub")} />
         <LinkRow to="/settings#blocked" icon="🚫" label={t("settings.blocked")} sub={t("settings.report")} />
+        <LinkRow to="/settings#messaging" icon="💬" label={t("safety.messaging")} sub={t("safety.messagingSub")} />
+        <LinkRow to="/account" icon="🔑" label={t("safety.acctsec")} sub={t("safety.acctsecSub")} />
         <LinkRow to="/settings#permissions" icon="🔐" label={t("gov.perms.title")} />
         <LinkRow to="/business" icon="🏢" label={t("gov.businessInfo")} />
       </div>

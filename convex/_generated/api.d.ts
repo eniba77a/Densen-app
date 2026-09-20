@@ -14,6 +14,8 @@ import type * as auth from "../auth.js";
 import type * as authInternals from "../authInternals.js";
 import type * as content from "../content.js";
 import type * as media from "../media.js";
+import type * as privacy from "../privacy.js";
+import type * as privacyInternals from "../privacyInternals.js";
 import type * as profiles from "../profiles.js";
 import type * as safetyCore from "../safetyCore.js";
 import type * as security from "../security.js";
@@ -34,6 +36,8 @@ declare const fullApi: ApiFromModules<{
   authInternals: typeof authInternals;
   content: typeof content;
   media: typeof media;
+  privacy: typeof privacy;
+  privacyInternals: typeof privacyInternals;
   profiles: typeof profiles;
   safetyCore: typeof safetyCore;
   security: typeof security;
