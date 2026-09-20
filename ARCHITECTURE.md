@@ -92,6 +92,32 @@ past review), `sendMessage` (minor-contact gate, grooming scan, contact-pattern
 watch/restrict, guardian-visible teacher threads), `listNotifications` /
 `markNotificationsRead` (non-PII rows, actor fields via public profiles only).
 
+### Privacy Center: server-decided toggles (Day 3b)
+
+The Privacy Center (`/privacy`; live for signed-in users, hub for guests) is a
+client **preview** only — every mutation is re-decided server-side in
+`convex/privacyInternals.ts` (pure cores, unit-tested) via `convex/privacy.ts`:
+
+- `updatePrivacySettings` — band-aware clamping: minors keep private accounts,
+  hidden city, filtered comments; `everyone` audiences (messages/mentions/tags)
+  clamp to `followers`; under-13 loses handle discoverability.
+- `recordConsent` — one append-only `consents` row per document (user, type,
+  version, region, source, timestamp); versions are pinned server-side;
+  minors can never grant marketing/personalization/licensing consents; each
+  document is a separate checkbox and optional ones start unchecked.
+- `setDevicePermission` — records the **outcome of a real OS prompt** (camera,
+  microphone, photos, location, notifications). Prompts fire only on feature
+  activation (never in bulk at signup) and are never fabricated.
+- `blockUser`/`unblockUser` — `blocks` table; staff stay reachable.
+- `requestAccountDeletion` — typed `DELETE` confirmation, revokes every session,
+  sets `status:"deleted"`, appends an audit row.
+- `getPrivacyCenter` — one non-PII snapshot (age category CHILD/TEEN/ADULT from
+  the band, never the DOB; effective settings; consent history; blocked list via
+  public projections).
+
+Signup records the three required consents (terms, privacy, guidelines) in the
+same transaction as the account — `signUp` fails closed without them.
+
 ### Credits: ledger + snapshot pattern
 
 `creditTransactions` is the auditable source of truth (signed amount +

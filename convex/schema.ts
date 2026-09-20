@@ -784,6 +784,10 @@ const privacySettings = defineTable({
   discoverableByHandle: v.boolean(),
   showCity: v.boolean(), // approximate location only, user-controlled
   personalization: v.boolean(),
+  // Privacy Center deltas (Day 3, additive + optional — zero backfill):
+  mentionsFrom: v.optional(v.union(v.literal("everyone"), v.literal("followers"), v.literal("none"))),
+  tagsFrom: v.optional(v.union(v.literal("everyone"), v.literal("followers"), v.literal("none"))),
+  notificationsEnabled: v.optional(v.boolean()), // device/OS notifications opt-in
   updatedAt: v.number(),
 }).index("by_user", ["userId"]);
 

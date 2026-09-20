@@ -20,17 +20,18 @@ import {
 } from "../data/governance";
 import { courseById } from "../data/store";
 
-function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
+function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <button
       onClick={() => onChange(!on)}
       role="switch"
       aria-checked={on}
       aria-label={label}
+      disabled={disabled}
       style={{
-        width: 46, height: 27, borderRadius: 999, border: "none", cursor: "pointer",
+        width: 46, height: 27, borderRadius: 999, border: "none", cursor: disabled ? "default" : "pointer",
         position: "relative", background: on ? "var(--gold)" : "rgba(255,255,255,0.14)",
-        transition: "background 0.2s ease", flexShrink: 0,
+        transition: "background 0.2s ease", flexShrink: 0, opacity: disabled ? 0.55 : 1,
       }}
     >
       <span style={{ position: "absolute", top: 3, left: on ? 22 : 3, width: 21, height: 21, borderRadius: "50%", background: on ? "#171204" : "#aeb5c0", transition: "left 0.2s ease" }} />

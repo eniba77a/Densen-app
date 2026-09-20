@@ -87,6 +87,14 @@ function SignUpForm() {
   const [submitting, setSubmitting] = useState(false);
   const [errorKey, setErrorKey] = useState("");
 
+  // Consents — each document is a SEPARATE checkbox. Required acceptances start
+  // unchecked; optional consents (marketing/personalization) are never
+  // pre-checked and marketing is not offerable to minors (server-enforced).
+  const [consentTerms, setConsentTerms] = useState(false);
+  const [consentPrivacy, setConsentPrivacy] = useState(false);
+  const [consentGuidelines, setConsentGuidelines] = useState(false);
+  const [consentMarketing, setConsentMarketing] = useState(false);
+
   const band = useMemo(() => ageBand(dob || undefined), [dob]);
   const serverBand = useMemo(() => (dob ? ageBandFromDob(dob, new Date()) : null), [dob]);
   const previewBand: AgeBand | null =
@@ -106,6 +114,7 @@ function SignUpForm() {
     if (pwErr) return setErrorKey(pwErr);
     if (!dob) return setErrorKey("invalid_dob");
     if (needsGuardian && !guardian.trim()) return setErrorKey("guardian_required");
+    if (!consentTerms || !consentPrivacy || !consentGuidelines) return setErrorKey("consent_required");
 
     setSubmitting(true);
     try {
@@ -118,6 +127,9 @@ function SignUpForm() {
         wantsTeacher,
         guardianName: needsGuardian ? guardian.trim() : undefined,
         city: city.trim() || undefined,
+        acceptedTerms: consentTerms,
+        acceptedPrivacy: consentPrivacy,
+        acceptedGuidelines: consentGuidelines,
       });
       if (res.ok) {
         nav("/"); // sign-in is the next module (AUTH-PLAN.md §3); land on Home
@@ -218,12 +230,41 @@ function SignUpForm() {
             </span>
           </label>
 
+          {/* Consent — separate checkbox per document; optional ones unchecked */}
+          <div style={{ marginTop: 18, padding: "14px 0 2px", borderTop: "1px solid var(--line)" }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>{t("auth.consent.title")}</div>
+            {([
+              ["terms", consentTerms, setConsentTerms, true, false],
+              ["privacy", consentPrivacy, setConsentPrivacy, true, false],
+              ["guidelines", consentGuidelines, setConsentGuidelines, true, false],
+              ["marketing", consentMarketing, setConsentMarketing, false, band !== "adult"],
+            ] as const).map(([key, checked, set, required, locked]) => (
+              <label key={key} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8, fontSize: 12.5, color: "var(--muted)", cursor: locked ? "default" : "pointer", opacity: locked ? 0.55 : 1 }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={locked}
+                  onChange={(e) => set(e.target.checked)}
+                  style={{ marginTop: 2 }}
+                  aria-label={t(`auth.consent.${key}` as never)}
+                />
+                <span>
+                  {t(`auth.consent.${key}` as never)}{" "}
+                  {required && <span className="required-tag">{t("auth.consent.required")}</span>}
+                  {locked && <span className="faint" style={{ fontSize: 11 }}>· {t("privacy.live.locked")}</span>}
+                </span>
+              </label>
+            ))}
+            <p className="faint" style={{ fontSize: 11.5, margin: "2px 0 0" }}>{t("auth.consent.note")}</p>
+          </div>
+
           <button type="submit" className="btn" disabled={submitting} style={{ width: "100%", marginTop: 18, justifyContent: "center" }}>
             {submitting ? t("auth.submitting") : t("auth.submit")}
           </button>
           {err("network", t("auth.err.network"))}
           {err("generic", t("auth.err.generic"))}
           {err("teacher_intent_minor", t("auth.err.teacher_minor"))}
+          {err("consent_required", t("auth.err.consent_required"))}
         </form>
 
         <p className="faint" style={{ fontSize: 12, textAlign: "center" }}>
