@@ -15,6 +15,7 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { sha256Hex } from "./authInternals";
 import { sessionValid } from "./sessionsInternals";
+import { decideVideoVisibility } from "./videoInternals";
 import {
   scanCommentCore,
   scanGroomingCore,
@@ -305,6 +306,8 @@ export const createPost = mutationGeneric({
     audioLicensed: v.boolean(),
     /** True only when the client had a real uploaded video ref (media module). */
     storageRef: v.optional(v.string()),
+    /** Real uploaded video (Day 4 pipeline) — ownership is verified server-side. */
+    videoId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -329,12 +332,28 @@ export const createPost = mutationGeneric({
     });
     if (decision.action === "deny") return { ok: false as const, error: decision.error, ruleIds: scan.ruleIds };
 
+    // Ownership check for the attached video: only the caller's own READY
+    // video can be published (no cross-user attachment, no pending uploads).
+    let videoRow: { _id: string; ownerUserId: string; processingStatus?: string; storageRef: string } | null = null;
+    if (args.videoId) {
+      const v = (await ctx.db.get(args.videoId as never)) as { _id: string; ownerUserId: string; processingStatus?: string; storageRef: string } | null;
+      if (!v || v.ownerUserId !== caller.userId || (v.processingStatus ?? "ready") !== "ready" || v.storageRef === "pending") {
+        return { ok: false as const, error: "invalid_video" };
+      }
+      videoRow = v;
+    }
+
+    // Server-side minor clamp: minors never publish publicly (Day-1 rule,
+    // now enforced on the wire path too).
+    const effectiveVisibility = decideVideoVisibility(args.visibility, creatorIsMinor);
+
     const postId = await ctx.db.insert("posts", {
       userId: caller.userId as never,
+      videoId: videoRow ? (videoRow._id as never) : undefined,
       caption: args.caption.trim(),
       hashtags: args.hashtags,
       style: args.style,
-      visibility: args.visibility,
+      visibility: effectiveVisibility,
       status: decision.status,
       likeCount: 0,
       commentCount: 0,
@@ -344,10 +363,17 @@ export const createPost = mutationGeneric({
       updatedAt: now,
     });
 
+    // The video asset mirrors the post's server-decided visibility.
+    if (videoRow) {
+      await ctx.db.patch(videoRow._id as never, { visibility: effectiveVisibility, updatedAt: now });
+    }
+
     await ctx.db.insert("auditLogs", {
       actorUserId: caller.userId as never,
-      action: decision.status === "in_review" ? "post_held_for_review" : "post_published",
-      summary: `post publish scan; rules:${scan.ruleIds.join("|") || "none"}`,
+      eventType: "content_moderation",
+      targetType: "post",
+      targetId: postId,
+      summary: `post ${decision.status === "in_review" ? "held_for_review" : "published"}; rules:${scan.ruleIds.join("|") || "none"}`,
       createdAt: now,
     });
     return { ok: true as const, postId, status: decision.status };

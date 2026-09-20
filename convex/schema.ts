@@ -298,6 +298,21 @@ const videos = defineTable({
     v.literal("removed")
   ),
   audioRef: v.optional(v.string()), // licensed audio registry ref
+  // Upload-pipeline deltas (Day 4, additive + optional — zero backfill;
+  // legacy rows without these are treated as ready/published assets):
+  processingStatus: v.optional(
+    v.union(
+      v.literal("awaiting_upload"), // row minted, signed URL issued, blob not yet stored
+      v.literal("processing"), // future transcode/copyright pipeline hook
+      v.literal("ready"),
+      v.literal("failed")
+    )
+  ),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  /** Server-enforced window to finish the direct upload (stale-row hygiene). */
+  uploadExpiresAt: v.optional(v.number()),
+  /** Stable failure code (unsupported_type | too_large | network | upload_failed) — never free text from the client. */
+  failedReason: v.optional(v.string()),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
