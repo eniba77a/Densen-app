@@ -207,3 +207,30 @@ export const IcSparkles = ({ size = 22, style }: P) => (
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" />
   </svg>
 );
+
+export const IcVolume = ({ size = 20, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" fill={filled ? "currentColor" : "none"} />
+    <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M19 6a8.5 8.5 0 0 1 0 12" />
+  </svg>
+);
+
+export const IcVolumeOff = ({ size = 20, style }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor" />
+    <path d="m17 9 4 6M21 9l-4 6" />
+  </svg>
+);
+
+export const IcExpand = ({ size = 20, style }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+  </svg>
+);
+
+export const IcShrink = ({ size = 20, style }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" />
+  </svg>
+);

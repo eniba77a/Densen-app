@@ -48,8 +48,10 @@ const V = (id: string, spec: string) => `https://videos.pexels.com/video-files/$
 
 export const VID = {
   portrait: V("2785536", "hd_1080_1920_25fps"), // vertical dance clip
+  portrait2: V("2795409", "hd_1080_1920_25fps"), // vertical dance clip (studio solo)
   landscapeA: V("3195394", "hd_1920_1080_25fps"), // landscape dance clip
   landscapeB: V("3209828", "hd_1920_1080_25fps"), // landscape dance clip
+  landscapeC: V("4114797", "hd_1280_720_25fps"), // landscape dance clip
 } as const;
 
 const av = (id: string) => `https://i.pravatar.cc/300?u=densen-${id}`;

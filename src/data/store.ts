@@ -75,6 +75,13 @@ export interface Post {
   views: number;
 }
 
+/**
+ * Vertical feed video sources — distinct clips per post (Day 5).
+ * All URLs verified reachable (HTTP 206). Pexels File API URLs are stable
+ * direct MP4s; specs resolve per-upload, so candidates are probed before use.
+ */
+export const FEED_VIDEOS = [VID.portrait, VID.portrait2, VID.landscapeB, VID.landscapeA, VID.landscapeC] as const;
+
 export interface Comment {
   id: string;
   userId: string;
@@ -659,7 +666,7 @@ export const posts: Post[] = [
   {
     id: "p1",
     userId: "u_sara",
-    video: VID.portrait,
+    video: FEED_VIDEOS[1],
     cover: IMG.catHipHop,
     style: "Hip Hop",
     caption: "8-count groove after class today 🎧 feel the bounce, forget the steps",
@@ -679,7 +686,7 @@ export const posts: Post[] = [
   {
     id: "p2",
     userId: "u_jona",
-    video: VID.portrait,
+    video: FEED_VIDEOS[2],
     cover: IMG.catCommercial,
     style: "Commercial",
     caption: "finished week 3 of Stage Ready!! swipe up to learn it too 💫",
@@ -699,7 +706,7 @@ export const posts: Post[] = [
   {
     id: "p3",
     userId: "u_maria",
-    video: VID.portrait,
+    video: FEED_VIDEOS[3],
     cover: IMG.catContemporary,
     style: "Contemporary",
     caption: "breath is the metronome. floorwork phrase from this week's lab.",
@@ -717,7 +724,7 @@ export const posts: Post[] = [
   {
     id: "p4",
     userId: "u_luca",
-    video: VID.portrait,
+    video: FEED_VIDEOS[4],
     cover: IMG.catLatin,
     style: "Latin",
     caption: "salsa footwork drill — no partner needed, just timing 👟",
@@ -734,7 +741,7 @@ export const posts: Post[] = [
   {
     id: "p5",
     userId: "u_maya",
-    video: VID.portrait,
+    video: FEED_VIDEOS[0],
     cover: IMG.catCommercial,
     style: "Commercial",
     caption: "heels class能量 → 'Slow Burn' audio is trending, go use it 🔥",
@@ -752,7 +759,7 @@ export const posts: Post[] = [
   {
     id: "p6",
     userId: "u_noa",
-    video: VID.portrait,
+    video: FEED_VIDEOS[1],
     cover: IMG.catKids,
     style: "Kids",
     caption: "my first routine!!! mom filmed it 🥹 #kidshiphop",
@@ -769,7 +776,7 @@ export const posts: Post[] = [
   {
     id: "p7",
     userId: "u_alex",
-    video: VID.portrait,
+    video: FEED_VIDEOS[2],
     cover: IMG.catBattle,
     style: "Hip Hop",
     caption: "foundations first. bounce → isolation → combo. full course on Densen.",
@@ -786,7 +793,7 @@ export const posts: Post[] = [
   {
     id: "p8",
     userId: "u_elsa",
-    video: VID.portrait,
+    video: FEED_VIDEOS[3],
     cover: IMG.catFreestyle,
     style: "Contemporary",
     caption: "duet attempt on maria's phrase — side by side version 🤍",
