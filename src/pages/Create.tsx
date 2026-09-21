@@ -48,12 +48,16 @@ const STYLES = ["Hip Hop", "Commercial", "Contemporary", "Jazz", "Latin", "Kids"
 
 /* ---------------- create post ---------------- */
 export default function Create() {
-  const { t, lang, allPosts, addPost } = useStore();
+  const { t, lang, allPosts, addPost, toast } = useStore();
   const gov = useGov();
   const auth = useAuth();
   const nav = useNavigate();
   const [params] = useSearchParams();
   const challengeId = params.get("challenge");
+  // Day 7 — Remix/Duet lineage: /create?remix=<postId> or ?duet=<postId>
+  // pre-fills the composer as a response to the original.
+  const remixOf = params.get("remix");
+  const duetOf = params.get("duet");
   const convex = useConvex();
   const createPostLive = useMutation(api.content.createPost);
 
@@ -181,10 +185,17 @@ export default function Create() {
           visibility: effVisibility,
           audioLicensed: true,
           videoId: uploadedVideoId,
+          // Day 7 lineage — the server re-checks the original creator's
+          // reuse permission; these ids are never trusted client-side.
+          remixOfPostId: remixOf ?? undefined,
+          duetOfPostId: duetOf ?? undefined,
         });
         if (res?.ok) {
           setPublishedId(String(res.postId));
         } else {
+          if (res.error === "reuse_not_allowed") {
+            toast(t("gov.reuse.offBySafety"));
+          }
           setFileError((res.error as UploadErrorCode) ?? "upload_failed");
           setUploadStage({ stage: "failed", error: (res.error as UploadErrorCode) ?? "upload_failed" });
         }
@@ -500,14 +511,13 @@ export function Duet() {
   const { postId } = useParams();
   const { t, toast } = useStore();
   const nav = useNavigate();
+  // All hooks run unconditionally BEFORE any early return (hook-order safety).
+  const [layout, setLayout] = useState<"side" | "follow" | "variation">("side");
   const post = posts.find((p) => p.id === postId);
 
   if (!post) return <Page><Empty icon="🔍" text="Post not found" /></Page>;
 
   const original = userById(post.userId);
-  const [layout, setLayout] = useState<"side" | "follow" | "variation">("side");
-  void layout;
-
   return (
     <Page>
       <button onClick={() => nav(-1)} className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}>← {t("common.back")}</button>
@@ -516,12 +526,23 @@ export function Duet() {
         {t("create.duetWith")} <strong>@{original.username}</strong>
       </p>
 
-      {/* duet stage */}
+      {/* duet stage — layout selector actually drives the stage */}
       <div style={{ borderRadius: "var(--radius-lg)", overflow: "hidden", background: "#000", border: "1px solid var(--line)", marginBottom: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", aspectRatio: "9/16", maxHeight: "62dvh", margin: "0 auto" }}>
-          <video src={post.video} poster={post.cover} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }} />
-        </div>
+        {layout === "side" && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", aspectRatio: "9/16", maxHeight: "62dvh", margin: "0 auto" }}>
+            <video src={post.video} poster={post.cover} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }} />
+          </div>
+        )}
+        {layout === "follow" && (
+          <div style={{ position: "relative", aspectRatio: "9/16", maxHeight: "62dvh", margin: "0 auto" }}>
+            <video src={post.video} poster={post.cover} autoPlay muted loop playsInline style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ position: "absolute", right: 10, bottom: 10, width: "34%", aspectRatio: "9/16", objectFit: "cover", borderRadius: 10, border: "1px solid var(--gold-line)" }} />
+          </div>
+        )}
+        {layout === "variation" && (
+          <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ width: "100%", aspectRatio: "9/16", maxHeight: "62dvh", objectFit: "cover" }} />
+        )}
       </div>
 
       <div className="muted" style={{ fontSize: 13, marginBottom: 16, textAlign: "center" }}>
@@ -579,3 +600,72 @@ export function Duet() {
 }
 
 const ME_NAME = "bledi.dances";
+
+/**
+ * Day 7 — Remix page (/remix/:postId).
+ * "Create your version of this choreography." Shows the original side-by-side
+ * with the dancer's own take (layout selectable), then deep-links into the
+ * real Create composer with `?remix=<postId>` so the actual publish pipeline
+ * (upload → createPost with server-verified lineage) carries the attribution.
+ */
+export function Remix() {
+  const { postId } = useParams();
+  const { t, toast } = useStore();
+  const nav = useNavigate();
+  const auth = useAuth();
+  const [layout, setLayout] = useState<"side" | "variation">("side");
+  const original = posts.find((p) => p.id === postId);
+
+  if (!original) return <Page><Empty icon="🔍" text="Post not found" /></Page>;
+
+  const originalUser = userById(original.userId);
+  const enter = () => {
+    if (!auth.viewer) {
+      toast(t("create.signInToRemix"));
+      nav("/auth");
+      return;
+    }
+    nav(`/create?remix=${original.id}`);
+  };
+
+  return (
+    <Page>
+      <button onClick={() => nav(-1)} className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}>← {t("common.back")}</button>
+      <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: 2 }}>{t("act.remix")}</h1>
+      <p className="muted" style={{ margin: "0 0 18px", fontSize: 13.5 }}>
+        {t("act.remixDesc")} <strong>@{originalUser.username}</strong>
+      </p>
+
+      {/* remix stage — original and your take, side-by-side or full variation */}
+      <div style={{ borderRadius: "var(--radius-lg)", overflow: "hidden", background: "#000", border: "1px solid var(--line)", marginBottom: 14 }}>
+        {layout === "side" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", aspectRatio: "9/16", maxHeight: "62dvh", margin: "0 auto" }}>
+            <video src={original.video} poster={original.cover} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          </div>
+        ) : (
+          <video src={VID.portrait} poster={IMG.extra5} autoPlay muted loop playsInline style={{ width: "100%", aspectRatio: "9/16", maxHeight: "62dvh", objectFit: "cover" }} />
+        )}
+      </div>
+
+      <div className="muted" style={{ fontSize: 13, marginBottom: 16, textAlign: "center" }}>
+        {t("feed.originalBy")} <strong className="gold-text">@{originalUser.username}</strong>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        {([
+          { id: "side", label: `⬛⬛ ${t("create.remixSide")}` },
+          { id: "variation", label: `✨ ${t("create.remixVariation")}` },
+        ] as const).map((o) => (
+          <button key={o.id} className={`chip${layout === o.id ? " active" : ""}`} onClick={() => setLayout(o.id)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      <button className="btn btn-primary" style={{ width: "100%", padding: "14px 22px", fontSize: 15 }} onClick={enter}>
+        🔁 {t("act.remix")} · {t("create.publish")}
+      </button>
+    </Page>
+  );
+}

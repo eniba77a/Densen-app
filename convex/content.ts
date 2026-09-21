@@ -83,6 +83,26 @@ export async function notify(
 /*                          Comments (Talk layer)                      */
 /* ================================================================== */
 
+/** Either-direction block between two users (absolute — mirrors interactionsWire).
+ *  db is typed loosely per this module's convention (callerFromToken). */
+async function blockedBetween(
+  db: { query: (t: string) => any },
+  a: string,
+  b: string
+): Promise<boolean> {
+  if (!a || !b || a === b) return false;
+  const fromA = (await db
+    .query("blocks")
+    .withIndex("by_blocker", (q: any) => q.eq("blockerId", a))
+    .collect()) as { blockedId: string }[];
+  if (fromA.some((r) => r.blockedId === b)) return true;
+  const fromB = (await db
+    .query("blocks")
+    .withIndex("by_blocker", (q: any) => q.eq("blockerId", b))
+    .collect()) as { blockedId: string }[];
+  return fromB.some((r) => r.blockedId === a);
+}
+
 export interface CommentDecisionInput {
   caller: Caller | null;
   /** Trimmed comment body as submitted. */
@@ -353,6 +373,10 @@ export const createPost = mutationGeneric({
     storageRef: v.optional(v.string()),
     /** Real uploaded video (Day 4 pipeline) — ownership is verified server-side. */
     videoId: v.optional(v.string()),
+    /** Remix/Duet lineage (Day 7): the post being remixed / duetted.
+     *  Reuse permission is re-checked SERVER-side — the client gate is UX only. */
+    remixOfPostId: v.optional(v.string()),
+    duetOfPostId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -392,6 +416,39 @@ export const createPost = mutationGeneric({
     // now enforced on the wire path too).
     const effectiveVisibility = decideVideoVisibility(args.visibility, creatorIsMinor);
 
+    // Day 7 — Remix/Duet lineage. The original creator's reuse setting and the
+    // original post's publish state are re-decided here (client gates are UX).
+    let remixOfPostId: string | undefined = undefined;
+    let duetOfPostId: string | undefined = undefined;
+    let originalCreatorId: string | undefined = undefined;
+    const lineageSourceId = args.remixOfPostId ?? args.duetOfPostId;
+    if (lineageSourceId) {
+      const source = (await ctx.db.get(lineageSourceId as never)) as {
+        _id: string;
+        userId: string;
+        status: string;
+        remixOfPostId?: string;
+        duetOfPostId?: string;
+      } | null;
+      if (!source || source.status !== "published") return { ok: false as const, error: "lineage_unavailable" };
+      if (source.userId === caller.userId) return { ok: false as const, error: "lineage_unavailable" };
+      if (await blockedBetween(ctx.db, caller.userId, source.userId)) {
+        return { ok: false as const, error: "blocked" };
+      }
+      const authorProfile = (await ctx.db
+        .query("profiles")
+        .withIndex("userId", (q: any) => q.eq("userId", source.userId))
+        .unique()) as { allowRemix?: boolean; allowDuet?: boolean } | null;
+      const allowed =
+        args.remixOfPostId
+          ? authorProfile?.allowRemix ?? false
+          : authorProfile?.allowDuet ?? false;
+      if (!allowed) return { ok: false as const, error: "reuse_not_allowed" };
+      if (args.remixOfPostId) remixOfPostId = lineageSourceId;
+      else duetOfPostId = lineageSourceId;
+      originalCreatorId = source.userId;
+    }
+
     const postId = await ctx.db.insert("posts", {
       userId: caller.userId as never,
       videoId: videoRow ? (videoRow._id as never) : undefined,
@@ -404,9 +461,25 @@ export const createPost = mutationGeneric({
       commentCount: 0,
       shareCount: 0,
       viewCount: 0,
+      remixOfPostId: remixOfPostId as never,
+      duetOfPostId: duetOfPostId as never,
+      originalCreatorId: originalCreatorId as never,
       createdAt: now,
       updatedAt: now,
     });
+
+    // Notify the original creator that their work was reused (audit + bell).
+    if (originalCreatorId) {
+      await ctx.db.insert("notifications", {
+        userId: originalCreatorId as never,
+        actorUserId: caller.userId as never,
+        type: remixOfPostId ? "interaction_remix" : "interaction_duet",
+        targetType: "post",
+        targetId: postId,
+        read: false,
+        createdAt: now,
+      });
+    }
 
     // The video asset mirrors the post's server-decided visibility.
     if (videoRow) {
