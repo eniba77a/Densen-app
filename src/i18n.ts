@@ -218,6 +218,9 @@ const en = {
   "create.duetSide": "Side-by-side",
   "create.duetFollow": "Follow choreography",
   "create.duetVariation": "Your variation",
+  "create.remixSide": "Side-by-side",
+  "create.remixVariation": "Full variation",
+  "create.signInToRemix": "Sign in to create your remix.",
   "create.selectVideo": "Select a video to duet with",
 
   "profile.videos": "Videos",
@@ -1195,6 +1198,9 @@ const sq: Record<TKey, string> = {
   "create.duetSide": "Krah-për-krah",
   "create.duetFollow": "Ndiq koreografinë",
   "create.duetVariation": "Variacioni yt",
+  "create.remixSide": "Krah-për-krah",
+  "create.remixVariation": "Variacion i plotë",
+  "create.signInToRemix": "Hyr në llogari për të krijuar rimixin tënd.",
   "create.selectVideo": "Zgjidh një video për duet",
 
   "profile.videos": "Videot",

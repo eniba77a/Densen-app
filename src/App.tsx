@@ -16,7 +16,7 @@ import { MessagesPage, ChatPage, NotificationsRoute } from "./pages/Messages";
 import PrivacyCenterLive from "./pages/PrivacyCenterLive";
 import { useAuth } from "./state/auth";
 import { UserProfilePage, TeamsPage, TeamDetailPage } from "./pages/Profile";
-import Create, { Duet } from "./pages/Create";
+import Create, { Duet, Remix } from "./pages/Create";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import Versions from "./pages/Versions";
@@ -86,6 +86,7 @@ function Shell() {
         <Route path="/team/:teamId" element={<TeamDetailPage />} />
         <Route path="/create" element={<Create />} />
         <Route path="/duet/:postId" element={<Duet />} />
+        <Route path="/remix/:postId" element={<Remix />} />
         <Route path="/versions/:postId" element={<Versions />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/admin" element={<Admin />} />
