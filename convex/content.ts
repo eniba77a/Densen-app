@@ -252,11 +252,56 @@ export const createComment = mutationGeneric({
     });
     await ctx.db.insert("auditLogs", {
       actorUserId: caller.userId as never,
-      action: decision.status === "hidden" ? "comment_auto_hidden" : "comment_created",
-      summary: `comment on post; rules:${decision.ruleIds.join("|") || "none"}`,
+      eventType: "content_moderation",
+      summary: decision.status === "hidden" ? "comment_auto_hidden" : "comment_created",
+      targetType: "post",
+      targetId: args.postId,
       createdAt: now,
     });
     return { ok: true as const, status: decision.status };
+  },
+});
+
+/**
+ * Talk layer read: the comment feed for one dance (post).
+ * Visible comments only (hidden/removed stay in moderation); author display
+ * fields resolve through public profile rows — no PII. Guests may read
+ * published-comment threads; posting still requires a session.
+ */
+export const listComments = queryGeneric({
+  args: { postId: v.string() },
+  handler: async (ctx, args) => {
+    const post = (await ctx.db.get(args.postId as never)) as { status: string } | null;
+    if (!post || post.status !== "published") return { ok: false as const, error: "post_unavailable", comments: [] as never[] };
+
+    const rows = (await ctx.db
+      .query("comments")
+      .withIndex("by_post_status", (q: any) =>
+        q.eq("postId", args.postId as never).eq("status", "visible")
+      )
+      .order("asc")
+      .take(200)) as { _id: string; userId: string; body: string; createdAt: number }[];
+
+    // Resolve author display fields through public profile rows only.
+    const authorIds = [...new Set(rows.map((r) => r.userId))];
+    const authors = new Map<string, { handle: string; displayName: string; avatarUrl?: string }>();
+    for (const uid of authorIds) {
+      const p = (await ctx.db
+        .query("profiles")
+        .withIndex("userId", (q: any) => q.eq("userId", uid as never))
+        .unique()) as { handle?: string; displayName?: string; avatarUrl?: string } | null;
+      if (p) authors.set(uid, { handle: p.handle ?? "dancer", displayName: p.displayName ?? "Dancer", avatarUrl: p.avatarUrl });
+    }
+
+    return {
+      ok: true as const,
+      comments: rows.map((r) => ({
+        id: r._id as string,
+        body: r.body,
+        createdAt: r.createdAt,
+        author: authors.get(r.userId) ?? { handle: "dancer", displayName: "Dancer", avatarUrl: undefined },
+      })),
+    };
   },
 });
 
