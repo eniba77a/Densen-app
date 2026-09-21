@@ -28,7 +28,7 @@ import {
   IcVolumeOff,
 } from "../components/icons";
 import { QUICK_REACTIONS, type QuickReaction } from "../../convex/interactions";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import {
   scanComment,
@@ -106,21 +106,135 @@ const challengeById = (id: string) => challengesById.get(id);
 
 /* ============================ comments ============================ */
 
+const AVATAR_FALLBACK = ME.avatar;
+
+/**
+ * 💬 TALK — reactive comment count for the dance, straight from the Convex
+ * `comments` table (visible rows only). Updates the moment any comment is
+ * committed — no refresh, no local mirror.
+ */
+function TalkCountButton({ postId, fallback, onOpen }: { postId: string; fallback: number; onOpen: () => void }) {
+  const { t } = useStore();
+  const data = useQuery(api.content.listComments, { postId });
+  const count =
+    data && typeof data === "object" && "ok" in data && data.ok
+      ? (data.comments as unknown[]).length
+      : fallback;
+  return <ActionBtn icon={<IcTalk size={24} />} label={fmt(count)} onClick={onOpen} aria-label={t("act.talk")} />;
+}
+
+/**
+ * One row of the live Convex-backed comment thread: DENSEN Talk content with
+ * the 6-reaction quick sheet anchored to the ✦ button (server-persisted).
+ */
+function LiveCommentRow({ c, targetIsMinor, onReacted }: { c: LiveComment; targetIsMinor: boolean; onReacted: () => void }) {
+  const { t, lang } = useStore();
+  const { toast, isBlocked, toggleBlock } = useGov();
+  const [quickOpen, setQuickOpen] = useState(false);
+  void targetIsMinor; // verdicts are server-side; kept for parity with previews
+
+  // Blocked authors' rows collapse (report/block always available).
+  if (isBlocked(c.author.handle)) {
+    return (
+      <div style={{ display: "flex", gap: 10, opacity: 0.55 }}>
+        <Avatar src={c.author.avatarUrl ?? AVATAR_FALLBACK} size={34} />
+        <div style={{ flex: 1 }}>
+          <div className="faint" style={{ fontSize: 12, fontWeight: 700 }}>@{c.author.handle}</div>
+          <div style={{ fontSize: 13, color: "var(--ink-faint)", fontStyle: "italic" }}>🛡 {t("gov.comment.autoHidden")}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 10 }}>
+      <Avatar src={c.author.avatarUrl ?? AVATAR_FALLBACK} size={34} />
+      <div style={{ flex: 1 }}>
+        <div className="faint" style={{ fontSize: 12, fontWeight: 700 }}>@{c.author.handle} · {relTime(c.createdAt, lang)}</div>
+        <div style={{ fontSize: 14, marginTop: 3 }}>{c.body}</div>
+      </div>
+      <div style={{ display: "flex", gap: 2, alignItems: "flex-start", position: "relative" }}>
+        <button
+          onClick={() => setQuickOpen((o) => !o)}
+          aria-label={t("act.energy")}
+          title={t("act.energy")}
+          style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 12, padding: 4 }}
+        >
+          ✦
+        </button>
+        <button
+          onClick={() => {
+            toggleBlock(c.author.handle);
+            toast(isBlocked(c.author.handle) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast"));
+            onReacted();
+          }}
+          aria-label={`${t("gov.msg.block")} @${c.author.handle}`}
+          title={t("gov.msg.block")}
+          style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
+        >
+          🚫
+        </button>
+        {quickOpen && <QuickReactionBar commentId={c.id} onDone={() => setQuickOpen(false)} />}
+      </div>
+    </div>
+  );
+}
+
+interface LiveComment {
+  id: string;
+  body: string;
+  createdAt: number;
+  author: { handle: string; displayName: string; avatarUrl?: string };
+}
+
+function relTime(ts: number, lang: string): string {
+  const diff = Date.now() - ts;
+  const m = Math.round(diff / 60_000);
+  if (lang === "sq") return m < 1 ? "tani" : m < 60 ? `${m}m` : `${Math.round(m / 60)}h`;
+  return m < 1 ? "now" : m < 60 ? `${m}m` : `${Math.round(m / 60)}h`;
+}
+
+/**
+ * Dance-specific comment feed (Talk layer) — backed by the Convex `comments`
+ * table for the active dance. Live via useQuery; submission persists through
+ * `content.createComment` (server scan is the gate) and appears immediately
+ * via the reactive subscription. Guest mode reads the thread but cannot post.
+ */
 function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
   const { t, lang } = useStore();
   const { toast } = useGov();
+  const { sessionToken, viewer } = useAuth();
   const [text, setText] = useState("");
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [extra, setExtra] = useState<{ id: string; userId: string; text: string; time: string; likes: number }[]>([]);
+  const [sending, setSending] = useState(false);
+
+  // LIVE comment feed for this dance from Convex.
+  const data = useQuery(api.content.listComments, { postId: post.id });
+  const liveComments: LiveComment[] =
+    data && typeof data === "object" && "ok" in data && data.ok ? (data.comments as LiveComment[]) : [];
+
+  // Seed comments from the demo data still render (prototype parity), merged
+  // under the live thread — real Convex rows are the source of truth.
+  const seedComments = post.comments.map((c) => ({
+    id: c.id,
+    body: c.text,
+    createdAt: Date.now(),
+    author: (() => {
+      const u = userById(c.userId);
+      return { handle: u.username, displayName: u.name, avatarUrl: u.avatar };
+    })(),
+    mine: c.userId === "me",
+  }));
+
+  const createComment = useMutation(api.content.createComment);
 
   // Target audience matters: stricter filter when the post author is a minor.
   const targetIsMinor = Boolean(userById(post.userId).minor);
   const myScan: CommentScan = scanComment(text, targetIsMinor);
   const groom: ReturnType<typeof scanGrooming> = scanGrooming(text);
 
-  const tryPost = () => {
+  const tryPost = async () => {
     const clean = text.trim();
-    if (!clean) return;
+    if (!clean || sending) return;
     if (groom.severity === "critical") {
       toast(`🚨 ${t("gov.comment.groomingBlocked")}`);
       return;
@@ -129,10 +243,40 @@ function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
       toast(`⚠ ${t("gov.comment.blocked")} — ${myScan.matched.map((m) => tx(m, lang)).join(" · ")}`);
       return;
     }
-    setExtra((x) => [...x, { id: `x${Date.now()}`, userId: "me", text: clean, time: "now", likes: 0 }]);
-    if (myScan.verdict === "hidden") toast(`👁 ${t("gov.comment.hidden")} — ${myScan.matched.map((m) => tx(m, lang)).join(" · ")}`);
-    setText("");
+    if (!sessionToken) {
+      toast(t("comment.signInToPost"));
+      return;
+    }
+    setSending(true);
+    try {
+      const res = (await createComment({ sessionToken, postId: post.id, body: clean })) as {
+        ok: boolean;
+        status?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        const map: Record<string, string> = {
+          unauthenticated: "comment.signInToPost",
+          blocked: "act.blocked",
+          author_privacy: "comment.authorPrivacy",
+          post_unavailable: "act.denied",
+          caller_restricted: "act.denied",
+          invalid_body: "act.denied",
+        };
+        const key = (res.error && map[res.error]) || "act.denied";
+        toast(t(key as TKey));
+      } else {
+        if (res.status === "hidden") toast(`👁 ${t("gov.comment.hidden")} — ${myScan.matched.map((m) => tx(m, lang)).join(" · ")}`);
+        else toast(t("comment.posted"));
+        setText("");
+      }
+    } catch {
+      toast(t("act.denied"));
+    } finally {
+      setSending(false);
+    }
   };
+
   return (
     <div
       onClick={onClose}
@@ -156,26 +300,37 @@ function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
         }}
       >
         <div style={{ padding: "16px 18px 10px", textAlign: "center", fontWeight: 700, borderBottom: "1px solid var(--line)" }}>
-          {fmt(post.comments.length + extra.length)} {t("common.comment")}
+          {fmt(seedComments.length + liveComments.length)} {t("common.comment")}
         </div>
         <div style={{ overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 16, flex: 1 }}>
-          {post.comments.map((c) => (
-            <CommentRow key={c.id} c={c} targetIsMinor={targetIsMinor} onHide={() => setHidden((s) => new Set(s).add(c.id))} hidden={hidden.has(c.id)} />
+          {seedComments.map((c) => (
+            <div key={c.id} style={{ display: "flex", gap: 10 }}>
+              <Avatar src={c.author.avatarUrl} size={34} />
+              <div style={{ flex: 1 }}>
+                <div className="faint" style={{ fontSize: 12, fontWeight: 700 }}>@{c.author.handle} · {t("common.now")}</div>
+                <div style={{ fontSize: 14, marginTop: 3 }}>{c.body}</div>
+              </div>
+            </div>
           ))}
-          {extra.map((c) => (
-            <CommentRow key={c.id} c={c} targetIsMinor={targetIsMinor} onHide={() => setHidden((s) => new Set(s).add(c.id))} hidden={hidden.has(c.id)} />
+          {data === undefined && <div className="faint" style={{ textAlign: "center", fontSize: 12.5 }}>…</div>}
+          {liveComments.map((c) => (
+            <LiveCommentRow key={c.id} c={c} targetIsMinor={targetIsMinor} onReacted={() => undefined} />
           ))}
+          {data && typeof data === "object" && "ok" in data && data.ok && liveComments.length === 0 && seedComments.length === 0 && (
+            <div className="faint" style={{ textAlign: "center", fontSize: 13, padding: "18px 0" }}>{t("comment.empty")}</div>
+          )}
         </div>
         <div style={{ padding: "12px 16px calc(12px + var(--sab))", borderTop: "1px solid var(--line)", display: "flex", gap: 10 }}>
-          <Avatar src={ME.avatar} size={34} />
+          <Avatar src={viewer?.avatarUrl || ME.avatar} size={34} />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
             <input
               className="input"
-              placeholder={`${t("common.comment")}…`}
+              placeholder={sessionToken ? `${t("common.comment")}…` : t("comment.signInToPost")}
               value={text}
+              disabled={!sessionToken || sending}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") tryPost();
+                if (e.key === "Enter") void tryPost();
               }}
             />
             {text.trim().length > 0 && myScan.verdict !== "clean" && (
@@ -184,8 +339,8 @@ function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
                 {myScan.matched.length > 0 && ` — ${myScan.matched.map((m) => tx(m, lang)).join(" · ")}`}
               </div>
             )}
-            <button className="btn btn-primary btn-sm" onClick={tryPost} style={{ alignSelf: "flex-end" }}>
-              {t("common.post")}
+            <button className="btn btn-primary btn-sm" onClick={() => void tryPost()} disabled={!sessionToken || sending || !text.trim()} style={{ alignSelf: "flex-end", opacity: !sessionToken || sending || !text.trim() ? 0.55 : 1 }}>
+              {sending ? "…" : t("common.post")}
             </button>
           </div>
         </div>
@@ -194,99 +349,6 @@ function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
   );
 }
 
-function CommentRow({ c, targetIsMinor, onHide, hidden }: {
-  c: { id: string; userId: string; text: string; time: string; likes: number };
-  targetIsMinor: boolean;
-  onHide: () => void;
-  hidden: boolean;
-}) {
-  const u = userById(c.userId);
-  const { t, lang } = useStore();
-  const { toast, isBlocked, toggleBlock, isMuted, toggleMute } = useGov();
-  const [reportOpen, setReportOpen] = useState(false);
-  const [quickOpen, setQuickOpen] = useState(false);
-
-  // live moderation verdict on this comment
-  const scan = scanComment(c.text, targetIsMinor);
-  const autoHidden = scan.verdict !== "clean";
-  const shown = hidden || autoHidden;
-
-  const rowActions = (
-    <div style={{ display: "flex", gap: 2, alignItems: "center", position: "relative" }}>
-      <button
-        onClick={() => setQuickOpen((o) => !o)}
-        aria-label={t("act.energy")}
-        title={t("act.energy")}
-        style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 12, padding: 4 }}
-      >
-        ✦ {c.likes}
-      </button>
-      {quickOpen && <QuickReactionBar commentId={c.id} onDone={() => setQuickOpen(false)} />}
-      {c.userId !== "me" && (
-        <>
-          <button
-            onClick={onHide}
-            aria-label={`${t("gov.comment.hide")}`}
-            title={t("gov.comment.hide")}
-            style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
-          >
-            🙈
-          </button>
-          <button
-            onClick={() => setReportOpen(true)}
-            aria-label={`${t("settings.report")} @${u.username}`}
-            title={t("settings.report")}
-            style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
-          >
-            🚩
-          </button>
-          <button
-            onClick={() => {
-              toggleBlock(u.id);
-              toast(isBlocked(u.id) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast"));
-            }}
-            aria-label={`${t("gov.msg.block")} @${u.username}`}
-            title={t("gov.msg.block")}
-            style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
-          >
-            🚫
-          </button>
-          <button
-            onClick={() => {
-              toggleMute(u.id);
-              toast(isMuted(u.id) ? t("gov.msg.unmuted") : t("gov.msg.muted"));
-            }}
-            aria-label={`${t("gov.msg.mute")} @${u.username}`}
-            title={t("gov.msg.mute")}
-            style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
-          >
-            🔇
-          </button>
-        </>
-      )}
-    </div>
-  );
-
-  return (
-    <div style={{ display: "flex", gap: 10, opacity: shown ? 0.55 : 1 }}>
-      <Avatar src={u.avatar} size={34} />
-      <div style={{ flex: 1 }}>
-        <div className="faint" style={{ fontSize: 12, fontWeight: 700 }}>@{u.username} · {c.time}</div>
-        {shown ? (
-          <div style={{ fontSize: 13, marginTop: 3, color: "var(--ink-faint)", fontStyle: "italic" }}>
-            {hidden ? t("gov.comment.hiddenByYou") : `🛡 ${t("gov.comment.autoHidden")}${scan.matched.length ? ` — ${scan.matched.map((m) => tx(m, lang)).join(" · ")}` : ""}`}
-          </div>
-        ) : (
-          <div style={{ fontSize: 14, marginTop: 3 }}>{c.text}</div>
-        )}
-      </div>
-      {rowActions}
-      {reportOpen && (
-        <ReportModal open onClose={() => setReportOpen(false)} targetType="comment" targetId={c.id} targetLabel={`@${u.username}`} />
-      )}
-    </div>
-  );
-}
 
 /* ============================ video surface ============================ */
 
@@ -361,10 +423,6 @@ function FeedCard({
   const [playing, setPlaying] = useState(false);
   const [fs, setFs] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [interactions, setInteractions] = useState<{ counts: Record<string, number>; mine: Set<string> }>({
-    counts: {},
-    mine: new Set(),
-  });
   const stageRef = useRef<HTMLDivElement>(null);
 
   // Youth-safety: creators can disable duets. The duet button respects it.
@@ -373,13 +431,27 @@ function FeedCard({
   const { sessionToken } = useAuth();
   const interact = useMutation(api.interactionsWire.interact);
 
-  // Live DENSEN counters + my active interactions (server truth, not local guesswork).
-  // Counts are refreshed inside doAction responses; this hook reserves a
-  // session-scoped refetch point for when the app gains reactive queries.
+  // REACTIVE DENSEN counters + my active interactions — a live Convex
+  // subscription. Any interaction by anyone (this device or another) updates
+  // these counts immediately, no page refresh, no local mirrors.
+  const liveData = useQuery(
+    api.interactionsWire.getPostInteractions,
+    sessionToken ? { sessionToken, postId: post.id } : "skip"
+  );
+  const liveCounts: Record<string, number> =
+    liveData && typeof liveData === "object" && "ok" in liveData && liveData.ok
+      ? (liveData.counts as Record<string, number>)
+      : {};
+  const mineSet: Set<string> =
+    liveData && typeof liveData === "object" && "ok" in liveData && liveData.ok
+      ? new Set(liveData.mine as string[])
+      : new Set();
 
   /**
    * Fire a DENSEN interaction at the server (anti-spam/anti-farm live there).
-   * XP toasts only when the server actually granted first-time XP.
+   * The reactive subscription above re-renders the counts the moment the
+   * mutation commits — no local state mirroring. XP toasts only when the
+   * server actually granted first-time XP.
    */
   const doAction = async (action: "energy" | "move" | "practice" | "boost" | "challenge", okToast: string, deniedToast?: string) => {
     if (!sessionToken) {
@@ -400,22 +472,6 @@ function FeedCard({
         else toast(t("act.denied"));
         return;
       }
-      // boost state is mirrored below via setInteractions; nothing else needed
-      // optimistic local mirror of the server-decided toggle
-      setInteractions((prev) => {
-        const mine = new Set(prev.mine);
-        const counts = { ...prev.counts };
-        const key = action;
-        const wasActive = mine.has(key);
-        if (res.active) {
-          mine.add(key);
-          counts[key] = (counts[key] ?? 0) + (wasActive ? 0 : 1);
-        } else {
-          mine.delete(key);
-          counts[key] = Math.max(0, (counts[key] ?? 1) - 1);
-        }
-        return { counts, mine };
-      });
       if (res.xpGranted && res.xpGranted > 0) toast(t("act.xp", { n: res.xpGranted }));
       toast(okToast);
     } catch {
@@ -628,14 +684,14 @@ function FeedCard({
             </button>
           )}
         </div>
-        {/* PRIMARY: 🔥 ENERGY */}
-        <ActionBtn icon={<IcEnergy size={26} filled={interactions.mine.has("energy") || isLiked} />} label={fmt(likeCount + (interactions.counts.energy ?? 0))} active={interactions.mine.has("energy") || isLiked} onClick={() => void doAction("energy", t("act.energyDesc"))} />
-        {/* PRIMARY: 💬 TALK */}
-        <ActionBtn icon={<IcTalk size={24} />} label={fmt(post.comments.length)} onClick={() => setShowComments(true)} />
-        {/* PRIMARY: 💃 MOVE */}
-        <ActionBtn icon={<IcMove size={24} />} label={fmt((post.shares ?? 0) + (interactions.counts.move ?? 0))} onClick={() => void doAction("move", t("act.moved"))} />
-        {/* PRIMARY: 🎯 PRACTICE */}
-        <ActionBtn icon={<IcPractice size={24} filled={interactions.mine.has("practice") || isSaved} />} label={fmt(interactions.counts.practice ?? 0)} active={interactions.mine.has("practice") || isSaved} onClick={() => void doAction("practice", interactions.mine.has("practice") ? t("act.practiceRemoved") : t("act.practiced"))} />
+        {/* PRIMARY: 🔥 ENERGY — reactive count (server rows, live) */}
+        <ActionBtn icon={<IcEnergy size={26} filled={mineSet.has("energy") || isLiked} />} label={fmt(likeCount + (liveCounts.energy ?? 0))} active={mineSet.has("energy") || isLiked} onClick={() => void doAction("energy", t("act.energyDesc"))} />
+        {/* PRIMARY: 💬 TALK — reactive count (Convex comments table, live) */}
+        <TalkCountButton postId={post.id} fallback={post.comments.length} onOpen={() => setShowComments(true)} />
+        {/* PRIMARY: 💃 MOVE — reactive count (server rows, live) */}
+        <ActionBtn icon={<IcMove size={24} />} label={fmt((post.shares ?? 0) + (liveCounts.move ?? 0))} onClick={() => void doAction("move", t("act.moved"))} />
+        {/* PRIMARY: 🎯 PRACTICE — reactive count (server rows, live) */}
+        <ActionBtn icon={<IcPractice size={24} filled={mineSet.has("practice") || isSaved} />} label={fmt(liveCounts.practice ?? 0)} active={mineSet.has("practice") || isSaved} onClick={() => void doAction("practice", mineSet.has("practice") ? t("act.practiceRemoved") : t("act.practiced"))} />
         {/* SECONDARY: 🔁 REMIX · 👯 DUET · ⚡ BOOST · 🏆 CHALLENGE */}
         <ActionBtn icon={<IcRemix size={23} />} label={t("act.remix")} onClick={() => nav(`/remix/${post.id}`)} />
         {duetAllowed ? (
@@ -645,8 +701,8 @@ function FeedCard({
             <ActionBtn icon={<IcDuet size={23} />} label={t("gov.reuse.duetOff")} onClick={() => toast(t("gov.reuse.duetOff"))} />
           </span>
         )}
-        <ActionBtn icon={<IcBoost size={23} filled={interactions.mine.has("boost")} />} label={fmt(interactions.counts.boost ?? 0)} active={interactions.mine.has("boost")} onClick={() => void doAction("boost", t("act.boosted"), t("act.boostLimit"))} />
-        <ActionBtn icon={<IcChallenge size={23} />} label={t("act.challenge")} onClick={() => void doAction("challenge", t("act.challenged"))} />
+        <ActionBtn icon={<IcBoost size={23} filled={mineSet.has("boost")} />} label={fmt(liveCounts.boost ?? 0)} active={mineSet.has("boost")} onClick={() => void doAction("boost", t("act.boosted"), t("act.boostLimit"))} />
+        <ActionBtn icon={<IcChallenge size={23} />} label={fmt(liveCounts.challenge ?? 0)} active={mineSet.has("challenge")} onClick={() => void doAction("challenge", t("act.challenged"))} />
         {/* moderation hooks: report + block always available */}
         <ActionBtn icon="🚩" label={t("settings.report")} onClick={() => setReporting(true)} />
       </div>

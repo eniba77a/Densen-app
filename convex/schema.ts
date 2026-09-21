@@ -395,7 +395,8 @@ const reactions = defineTable({
   createdAt: v.number(),
 })
   .index("by_target", ["targetType", "targetId"]) // count per target
-  .index("by_user_target", ["userId", "targetType", "targetId"]); // toggle lookups
+  .index("by_user_target", ["userId", "targetType", "targetId"]) // toggle lookups
+  .index("by_user", ["userId"]); // Day 6: per-user rate-window lookups
 
 const follows = defineTable({
   followerId: v.id("users"),

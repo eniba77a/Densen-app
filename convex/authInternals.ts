@@ -157,7 +157,7 @@ export type SignUpDecision =
       /** Exact rows the wire layer inserts in ONE transaction. */
       rows: {
         user: { email: string; dob: string; ageBand: ServerAgeBand; ageAssurance: "self_declared" | "parental_consent"; role: "user" | "teacher"; isMinor: boolean; status: "active"; emailVerifiedAt?: number; passwordUpdatedAt: number; createdAt: number; updatedAt: number };
-        profile: { handle: string; displayName: string; city?: string; isPrivate: boolean; allowRemix: boolean; allowDuet: boolean; allowDownloads: boolean; creditBalance: 0; createdAt: number; updatedAt: number };
+        profile: { handle: string; displayName: string; styles: never[]; city?: string; isPrivate: boolean; allowRemix: boolean; allowDuet: boolean; allowDownloads: boolean; followerCount: 0; followingCount: 0; creditBalance: 0; createdAt: number; updatedAt: number };
         privacy: { privateAccount: boolean; messagesFrom: "everyone" | "followers" | "none"; showCity: boolean; discoverableByHandle: boolean; commentFilter: boolean; personalization: false; updatedAt: number };
         account: { provider: "password"; providerAccountId: string; emailVerified: false; createdAt: number; updatedAt: number };
       };
@@ -250,11 +250,14 @@ export function decideSignUp(input: SignUpInput, uniqueness: Uniqueness, now: Da
       profile: {
         handle,
         displayName: firstName,
+        styles: [],
         city: city !== undefined && city.length > 0 ? city : undefined,
         isPrivate: defaults.privateAccount,
         allowRemix: defaults.allowRemix,
         allowDuet: defaults.allowDuet,
         allowDownloads: defaults.allowDownloads,
+        followerCount: 0,
+        followingCount: 0,
         creditBalance: 0,
         createdAt: ts,
         updatedAt: ts,
