@@ -13,6 +13,8 @@ export const IMG = {
   catKids: img("1516131206008-dd041a9764fd"),
   catBeginners: img("1524368535928-5b5e00ddc76b"),
   catAdvanced: img("1526218626217-dc65a29bb444"),
+  catTeens: img("1518611012118-696072aa579a"),
+  catProfessional: img("1547153760-18fc863244c6"),
   catChoreo: img("1492684223066-81342ee5ff30"),
   catStage: img("1530103862676-de8c9debad1d"),
   catBattle: img("1470225620780-dba8ba36b745"),

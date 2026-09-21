@@ -284,6 +284,29 @@ const practiceSessions = defineTable({
   .index("by_user_lesson", ["userId", "lessonId"])
   .index("by_user_recent", ["userId", "createdAt"]);
 
+/** Day 7 — per-(user, lesson) progress + completion state machine.
+ *  lessonId is a free catalog key (the client seed catalog is not yet rows
+ *  in `lessons`); the field becomes v.id("lessons") with a backfill when
+ *  the catalog migrates into the DB. Completion XP is first-time-only via
+ *  the xpTransactions idempotency index. */
+const lessonProgress = defineTable({
+  userId: v.id("users"),
+  lessonKey: v.string(),
+  courseKey: v.optional(v.string()),
+  touchedPhases: v.array(v.union(
+    v.literal("watch"),
+    v.literal("learn"),
+    v.literal("practice"),
+    v.literal("complete")
+  )),
+  completedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_user_lesson", ["userId", "lessonKey"])
+  .index("by_user_course", ["userId", "courseKey"])
+  .index("by_user_recent", ["userId", "updatedAt"]);
+
 /* ---------------- content module ---------------- */
 const videos = defineTable({
   ownerUserId: v.id("users"),
@@ -891,6 +914,7 @@ export default defineSchema({
   courses,
   lessons,
   practiceSessions,
+  lessonProgress,
   videos,
   posts,
   comments,
