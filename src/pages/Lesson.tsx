@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { Empty, LevelBadge, Page } from "../components/ui";
 import { IcCheck, IcPause, IcPlay } from "../components/icons";
 import { useStore } from "../state/store";
+import { useAuth } from "../state/auth";
 import { courseById, userById } from "../data/store";
 
 type Phase = "watch" | "learn" | "practice" | "done";
@@ -11,8 +14,15 @@ export default function Lesson() {
   const { courseId, lessonId } = useParams();
   const nav = useNavigate();
   const { t, isLessonDone, completeLesson, touchLesson, toast } = useStore();
+  const auth = useAuth();
   const course = courseId ? courseById(courseId) : undefined;
   const lesson = course?.lessons.find((l) => l.id === lessonId);
+
+  // Day 7 — real server progress: phase engagement and completion persist
+  // through Convex for signed-in dancers. Guests keep the local preview.
+  const touchLive = useMutation(api.learningWire.touchLesson);
+  const completeLive = useMutation(api.learningWire.completeLesson);
+  const [serverXp, setServerXp] = useState<number | null>(null);
 
   const [phase, setPhase] = useState<Phase>("watch");
   const [playing, setPlaying] = useState(true);
@@ -23,7 +33,12 @@ export default function Lesson() {
 
   useEffect(() => {
     setPhase("watch");
-    if (course && lesson) touchLesson(course.id, lesson.id);
+    if (course && lesson) {
+      touchLesson(course.id, lesson.id);
+      if (auth.sessionToken) {
+        void touchLive({ sessionToken: auth.sessionToken, lessonKey: lesson.id, courseKey: course.id, phase: "watch" }).catch(() => undefined);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lessonId]);
 
@@ -182,13 +197,30 @@ export default function Lesson() {
                 className="btn btn-primary"
                 onClick={() => {
                   completeLesson(course.id, lesson.id);
+                  // Day 7 — persist completion server-side; XP comes from the
+                  // server decision (first completion pays, repeats never do).
+                  if (auth.sessionToken) {
+                    void completeLive({
+                      sessionToken: auth.sessionToken,
+                      lessonKey: lesson.id,
+                      courseKey: course.id,
+                    })
+                      .then((res) => {
+                        if (res.ok && res.xpGranted > 0) setServerXp(res.xpGranted);
+                      })
+                      .catch(() => undefined);
+                  }
                   toast("+150 XP");
                 }}
               >
                 <IcCheck size={17} /> {t("lesson.markComplete")}
               </button>
             )}
-            {done && <span className="chip active">✓ {t("lesson.completed")} · +150 XP</span>}
+            {done && (
+              <span className="chip active">
+                ✓ {t("lesson.completed")} · {serverXp !== null && serverXp === 0 ? t("lesson.xpAlready") : "+150 XP"}
+              </span>
+            )}
           </div>
         )}
       </div>
