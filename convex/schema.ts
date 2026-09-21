@@ -338,6 +338,9 @@ const posts = defineTable({
   /** "Move/share" layer: times the post was shared out of DENSEN. */
   shareCount: v.number(),
   viewCount: v.number(),
+  // Day 6 DENSEN interaction counters (additive + optional — zero backfill):
+  practiceCount: v.optional(v.number()), // 🎯 saved into dancers' Practice areas
+  boostCount: v.optional(v.number()), // ⚡ spotlights the post received
   createdAt: v.number(),
   updatedAt: v.number(),
 })
@@ -370,7 +373,25 @@ const reactions = defineTable({
   // DENSEN social vocabulary (Energy layer): "fire" | "hype" | "gold".
   // Closed union — unknown reaction kinds are rejected at the boundary
   // (see validators.vReactionKind), never silently stored.
-  kind: v.union(v.literal("fire"), v.literal("hype"), v.literal("gold")),
+  // Day 6 additive: DENSEN interaction rows reuse this table —
+  //   quick reactions:  "energy" | "on_point" | "vibe" | "insane" | "clean" | "power"
+  //   interactions:     "move" | "practice" | "boost" | "challenge"
+  // (legacy "fire"/"hype"/"gold" rows keep their meaning; treat "fire"≡energy).
+  kind: v.union(
+    v.literal("fire"),
+    v.literal("hype"),
+    v.literal("gold"),
+    v.literal("energy"),
+    v.literal("on_point"),
+    v.literal("vibe"),
+    v.literal("insane"),
+    v.literal("clean"),
+    v.literal("power"),
+    v.literal("move"),
+    v.literal("practice"),
+    v.literal("boost"),
+    v.literal("challenge")
+  ),
   createdAt: v.number(),
 })
   .index("by_target", ["targetType", "targetId"]) // count per target
@@ -563,7 +584,8 @@ const creditTransactions = defineTable({
     v.literal("reward"),
     v.literal("refund"),
     v.literal("expire"),
-    v.literal("admin_adjust")
+    v.literal("admin_adjust"),
+    v.literal("reaction") // Day 6: first-time interaction XP (farm-safe by core rules)
   ),
   refType: v.optional(v.string()), // mission | purchase | challenge | class_unlock …
   refId: v.optional(v.string()),

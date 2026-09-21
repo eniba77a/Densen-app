@@ -13,6 +13,8 @@ import type * as auditInternals from "../auditInternals.js";
 import type * as auth from "../auth.js";
 import type * as authInternals from "../authInternals.js";
 import type * as content from "../content.js";
+import type * as interactions from "../interactions.js";
+import type * as interactionsWire from "../interactionsWire.js";
 import type * as media from "../media.js";
 import type * as privacy from "../privacy.js";
 import type * as privacyInternals from "../privacyInternals.js";
@@ -37,6 +39,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authInternals: typeof authInternals;
   content: typeof content;
+  interactions: typeof interactions;
+  interactionsWire: typeof interactionsWire;
   media: typeof media;
   privacy: typeof privacy;
   privacyInternals: typeof privacyInternals;
