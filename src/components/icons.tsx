@@ -234,3 +234,131 @@ export const IcShrink = ({ size = 20, style }: P) => (
     <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" />
   </svg>
 );
+
+/* ================= DENSEN interaction vocabulary (Day 6) =================
+ * Custom marks for the dancer's own language — deliberately NOT the
+ * heart/comment/share/share-bookmark clones of generic social apps.
+ * Each glyph reads at 20–28px on dark video surfaces.
+ * ======================================================================== */
+
+const GOLD_FILL = (filled?: boolean) => ({ fill: filled ? "var(--gold)" : "none" });
+
+/** 🔥 ENERGY — a dancer's flame with a beat-line, not a heart. */
+export const IcEnergy = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path
+      d="M12 2.6c1.2 2.8.4 4.5-.9 6.2-1.1 1.5-2.3 3-2.3 5.2a5.2 5.2 0 0 0 10.4 0c0-1.9-.8-3.4-1.8-4.8-.3 1-.9 1.8-1.7 2.3.3-3.4-1.3-6.6-3.7-8.9z"
+      {...GOLD_FILL(filled)}
+      stroke="currentColor"
+    />
+    <path d="M8.5 21.4h7" strokeWidth={2} />
+  </svg>
+);
+
+/** 💬 TALK — two overlapping speech bubbles in a call-and-response. */
+export const IcTalk = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path
+      d="M3.5 5.5h11a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H8l-3.4 2.7a.5.5 0 0 1-.8-.4V7a1.5 1.5 0 0 1 1.5-1.5z"
+      {...GOLD_FILL(filled)}
+    />
+    <path d="M19 9.5h1a1.5 1.5 0 0 1 1.5 1.5v5.4a.5.5 0 0 1-.8.4L18.6 15H14" />
+  </svg>
+);
+
+/** 💃 MOVE — a dancer mid-turn with a motion trail, not an arrow. */
+export const IcMove = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <circle cx="13.4" cy="4.6" r="1.7" fill="currentColor" stroke="none" />
+    <path
+      d="M13.2 7.2c-2.1.5-3.4 2-3.9 4.1-.3 1.4 0 2.7.6 3.9l-2.3 5M13.2 7.2c1.7.9 2.7 2.3 2.9 4.2l.6 3.4 2.6 4.9"
+      {...GOLD_FILL(filled)}
+    />
+    <path d="M9.9 11.5 8 8.2M9.9 15.2h4.4" />
+  </svg>
+);
+
+/** 🎯 PRACTICE — target with a metronome pendulum. */
+export const IcPractice = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <circle cx="12" cy="12" r="8.6" {...GOLD_FILL(filled)} />
+    <circle cx="12" cy="12" r="4.6" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <path d="M12 3.4V1.6" strokeWidth={2} />
+  </svg>
+);
+
+/** 🔁 REMIX — two offset loop arrows forming an S. */
+export const IcRemix = ({ size = 22, style }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M6.5 8.5h9.2a3.3 3.3 0 0 1 0 6.6h-1.2" />
+    <path d="m12.7 12.9 2.4 2.2-2.4 2.2" />
+    <path d="M17.5 15.5H8.3a3.3 3.3 0 0 1 0-6.6h1.2" />
+    <path d="m11.3 4.7-2.4 2.2 2.4 2.2" transform="translate(0 -0.4)" />
+  </svg>
+);
+
+/** 👯 DUET — two mirrored dancers sharing one beat. */
+export const IcDuet = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <circle cx="7.4" cy="4.9" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="16.6" cy="4.9" r="1.6" fill="currentColor" stroke="none" />
+    <path d="M7.2 7.6c-1.8.8-2.7 2.2-2.9 4L4 15.5l2.6 5" {...GOLD_FILL(filled)} />
+    <path d="M16.8 7.6c1.8.8 2.7 2.2 2.9 4l.3 3.9-2.6 5" {...GOLD_FILL(filled)} />
+    <path d="M12 6.8v5.4M9.4 9.4h5.2" strokeWidth={1.6} />
+  </svg>
+);
+
+/** ⚡ BOOST — lightning bolt inside a rising spotlight beam. */
+export const IcBoost = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="m13.4 2.8-7 10h4.4l-1.6 8.4 7.2-10.6h-4.5z" {...GOLD_FILL(filled)} />
+  </svg>
+);
+
+/** 🏆 CHALLENGE — trophy cup over a battle bracket. */
+export const IcChallenge = ({ size = 22, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M8 4h8v5.4a4 4 0 0 1-8 0z" {...GOLD_FILL(filled)} />
+    <path d="M8 5H4.6c0 3.4 1.4 5.2 3.9 5.6M16 5h3.4c0 3.4-1.4 5.2-3.9 5.6" />
+    <path d="M12 13.4v3M8.6 20.6h6.8M9.8 17.6h4.4" />
+  </svg>
+);
+
+/* -------- quick comment reactions (6 one-tap energies) -------- */
+
+export const IcOnPoint = ({ size = 20, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <circle cx="12" cy="12" r="8.4" {...GOLD_FILL(filled)} />
+    <circle cx="12" cy="12" r="4.4" />
+    <path d="M12 3.6V1.8M12 22.2v-1.8M3.6 12H1.8M22.2 12h-1.8" strokeWidth={2} />
+  </svg>
+);
+
+export const IcVibe = ({ size = 20, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <circle cx="12" cy="12" r="8.6" {...GOLD_FILL(filled)} />
+    <path d="M5.6 7.4c3.8 2.6 9 2.6 12.8 0M5.6 16.6c3.8-2.6 9-2.6 12.8 0" strokeWidth={1.5} />
+  </svg>
+);
+
+export const IcInsane = ({ size = 20, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M13.2 2.4 5.4 13h4.6l-1.4 8.6L16.8 10h-4.8z" {...GOLD_FILL(filled)} />
+  </svg>
+);
+
+export const IcClean = ({ size = 20, style }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M6.2 12.4V5.6a1.4 1.4 0 0 1 2.8 0v5M9 10.4V4.2a1.4 1.4 0 0 1 2.8 0v6M11.8 10.6V5a1.4 1.4 0 0 1 2.8 0v6.2" />
+    <path d="M14.6 11.4V6.8a1.4 1.4 0 0 1 2.8 0v6.4c0 4.2-2.4 7-6.2 7-3.2 0-5-1.8-6.4-4.8L3.6 12.6c-.6-1.2.8-2.4 1.9-1.6l1.7 1.4" />
+  </svg>
+);
+
+export const IcPower = ({ size = 20, style, filled }: P) => (
+  <svg {...base(size)} style={style}>
+    <path d="M12 3.2a8.8 8.8 0 1 0 8.8 8.8" {...GOLD_FILL(filled)} />
+    <path d="M12 3.2a8.8 8.8 0 0 1 8.8 8.8" strokeWidth={3.4} />
+    <path d="M12 1.6v5.2" strokeWidth={2.2} />
+  </svg>
+);

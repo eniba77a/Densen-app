@@ -1,21 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { audios, challenges, courseById, fmt, userById, users, type Post } from "../data/store";
+import { useAuth } from "../state/auth";
 import { ME, useStore } from "../state/store";
 import { useGov } from "../state/governance";
 import { ReportModal, tx } from "../components/gov-ui";
 import { ActionBtn, Avatar } from "../components/ui";
 import {
-  IcComment,
+  IcBoost,
+  IcChallenge,
+  IcClean,
+  IcDuet,
+  IcEnergy,
   IcExpand,
-  IcHeart,
+  IcInsane,
+  IcMove,
   IcMusic,
+  IcOnPoint,
   IcPlay,
-  IcShare,
+  IcPower,
+  IcPractice,
+  IcRemix,
   IcShrink,
+  IcTalk,
+  IcVibe,
   IcVolume,
   IcVolumeOff,
 } from "../components/icons";
+import { QUICK_REACTIONS, type QuickReaction } from "../../convex/interactions";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import {
   scanComment,
   scanGrooming,
@@ -190,6 +204,7 @@ function CommentRow({ c, targetIsMinor, onHide, hidden }: {
   const { t, lang } = useStore();
   const { toast, isBlocked, toggleBlock, isMuted, toggleMute } = useGov();
   const [reportOpen, setReportOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
 
   // live moderation verdict on this comment
   const scan = scanComment(c.text, targetIsMinor);
@@ -197,8 +212,16 @@ function CommentRow({ c, targetIsMinor, onHide, hidden }: {
   const shown = hidden || autoHidden;
 
   const rowActions = (
-    <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-      <span className="faint" style={{ fontSize: 12 }}>♥ {c.likes}</span>
+    <div style={{ display: "flex", gap: 2, alignItems: "center", position: "relative" }}>
+      <button
+        onClick={() => setQuickOpen((o) => !o)}
+        aria-label={t("act.energy")}
+        title={t("act.energy")}
+        style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 12, padding: 4 }}
+      >
+        ✦ {c.likes}
+      </button>
+      {quickOpen && <QuickReactionBar commentId={c.id} onDone={() => setQuickOpen(false)} />}
       {c.userId !== "me" && (
         <>
           <button
@@ -326,7 +349,7 @@ function FeedCard({
   reasons: FeedReasonKind[];
   level?: CourseLevel;
 }) {
-  const { t, liked, toggleLike, saved, toggleSave, following, toggleFollow, toast } = useStore();
+  const { t, liked, saved, following, toggleFollow, toast } = useStore();
   const { isBlocked } = useGov();
   const nav = useNavigate();
   const u = userById(post.userId);
@@ -338,10 +361,67 @@ function FeedCard({
   const [playing, setPlaying] = useState(false);
   const [fs, setFs] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [interactions, setInteractions] = useState<{ counts: Record<string, number>; mine: Set<string> }>({
+    counts: {},
+    mine: new Set(),
+  });
   const stageRef = useRef<HTMLDivElement>(null);
 
   // Youth-safety: creators can disable duets. The duet button respects it.
   const duetAllowed = canReuse(users.find((x) => x.id === post.userId)?.minor ? "teen13_15" : "adult", undefined, "duet");
+
+  const { sessionToken } = useAuth();
+  const interact = useMutation(api.interactionsWire.interact);
+
+  // Live DENSEN counters + my active interactions (server truth, not local guesswork).
+  // Counts are refreshed inside doAction responses; this hook reserves a
+  // session-scoped refetch point for when the app gains reactive queries.
+
+  /**
+   * Fire a DENSEN interaction at the server (anti-spam/anti-farm live there).
+   * XP toasts only when the server actually granted first-time XP.
+   */
+  const doAction = async (action: "energy" | "move" | "practice" | "boost" | "challenge", okToast: string, deniedToast?: string) => {
+    if (!sessionToken) {
+      toast(t("act.denied"));
+      return;
+    }
+    try {
+      const res = (await interact({ sessionToken, postId: post.id, action })) as {
+        ok: boolean;
+        error?: string;
+        active?: boolean;
+        xpGranted?: number;
+      };
+      if (!res.ok) {
+        if (res.error === "boost_daily_limit" && deniedToast) toast(deniedToast);
+        else if (res.error === "blocked") toast(t("act.blocked"));
+        else if (res.error === "rate_limited") toast(t("act.rateLimited"));
+        else toast(t("act.denied"));
+        return;
+      }
+      // boost state is mirrored below via setInteractions; nothing else needed
+      // optimistic local mirror of the server-decided toggle
+      setInteractions((prev) => {
+        const mine = new Set(prev.mine);
+        const counts = { ...prev.counts };
+        const key = action;
+        const wasActive = mine.has(key);
+        if (res.active) {
+          mine.add(key);
+          counts[key] = (counts[key] ?? 0) + (wasActive ? 0 : 1);
+        } else {
+          mine.delete(key);
+          counts[key] = Math.max(0, (counts[key] ?? 1) - 1);
+        }
+        return { counts, mine };
+      });
+      if (res.xpGranted && res.xpGranted > 0) toast(t("act.xp", { n: res.xpGranted }));
+      toast(okToast);
+    } catch {
+      toast(t("act.denied"));
+    }
+  };
 
   // Autoplay when visible; pause + rewind when leaving the viewport.
   useEffect(() => {
@@ -548,17 +628,26 @@ function FeedCard({
             </button>
           )}
         </div>
-        <ActionBtn icon={<IcHeart size={27} filled={isLiked} />} label={fmt(likeCount)} active={isLiked} onClick={() => toggleLike(post.id)} />
-        <ActionBtn icon={<IcComment />} label={fmt(post.comments.length)} onClick={() => setShowComments(true)} />
-        <ActionBtn icon="🔖" label={isSaved ? t("common.saved") : t("common.save")} active={isSaved} onClick={() => { toggleSave(post.id); toast(isSaved ? "Removed from saved" : t("common.saved")); }} />
-        <ActionBtn icon={<IcShare />} label={fmt(post.shares)} onClick={() => toast(t("common.shareTo"))} />
+        {/* PRIMARY: 🔥 ENERGY */}
+        <ActionBtn icon={<IcEnergy size={26} filled={interactions.mine.has("energy") || isLiked} />} label={fmt(likeCount + (interactions.counts.energy ?? 0))} active={interactions.mine.has("energy") || isLiked} onClick={() => void doAction("energy", t("act.energyDesc"))} />
+        {/* PRIMARY: 💬 TALK */}
+        <ActionBtn icon={<IcTalk size={24} />} label={fmt(post.comments.length)} onClick={() => setShowComments(true)} />
+        {/* PRIMARY: 💃 MOVE */}
+        <ActionBtn icon={<IcMove size={24} />} label={fmt((post.shares ?? 0) + (interactions.counts.move ?? 0))} onClick={() => void doAction("move", t("act.moved"))} />
+        {/* PRIMARY: 🎯 PRACTICE */}
+        <ActionBtn icon={<IcPractice size={24} filled={interactions.mine.has("practice") || isSaved} />} label={fmt(interactions.counts.practice ?? 0)} active={interactions.mine.has("practice") || isSaved} onClick={() => void doAction("practice", interactions.mine.has("practice") ? t("act.practiceRemoved") : t("act.practiced"))} />
+        {/* SECONDARY: 🔁 REMIX · 👯 DUET · ⚡ BOOST · 🏆 CHALLENGE */}
+        <ActionBtn icon={<IcRemix size={23} />} label={t("act.remix")} onClick={() => nav(`/remix/${post.id}`)} />
         {duetAllowed ? (
-          <ActionBtn icon="🤝" label={t("feed.duet")} onClick={() => nav(`/duet/${post.id}`)} />
+          <ActionBtn icon={<IcDuet size={23} />} label={t("act.duet")} onClick={() => nav(`/duet/${post.id}`)} />
         ) : (
           <span title={t("gov.reuse.duetOff")} style={{ opacity: 0.4, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-            <ActionBtn icon="🤝" label={t("gov.reuse.duetOff")} onClick={() => toast(t("gov.reuse.duetOff"))} />
+            <ActionBtn icon={<IcDuet size={23} />} label={t("gov.reuse.duetOff")} onClick={() => toast(t("gov.reuse.duetOff"))} />
           </span>
         )}
+        <ActionBtn icon={<IcBoost size={23} filled={interactions.mine.has("boost")} />} label={fmt(interactions.counts.boost ?? 0)} active={interactions.mine.has("boost")} onClick={() => void doAction("boost", t("act.boosted"), t("act.boostLimit"))} />
+        <ActionBtn icon={<IcChallenge size={23} />} label={t("act.challenge")} onClick={() => void doAction("challenge", t("act.challenged"))} />
+        {/* moderation hooks: report + block always available */}
         <ActionBtn icon="🚩" label={t("settings.report")} onClick={() => setReporting(true)} />
       </div>
 
@@ -651,6 +740,84 @@ function FeedCard({
 /* ============================ the feed ============================ */
 
 const WINDOW = 5; // mounted videos around the active index (lazy loading)
+
+/* ============================ DENSEN action rail ============================ */
+
+const QUICK_ICONS: Record<QuickReaction, (p: { size?: number; filled?: boolean }) => JSX.Element> = {
+  energy: IcEnergy,
+  on_point: IcOnPoint,
+  vibe: IcVibe,
+  insane: IcInsane,
+  clean: IcClean,
+  power: IcPower,
+};
+
+/**
+ * The 6 DENSEN quick reactions as a fan-out sheet. One tap fires the server
+ * mutation (one row per user+comment+kind); the emoji chips are presentation
+ * only — the identity lives in the reaction id.
+ */
+function QuickReactionBar({
+  commentId,
+  onDone,
+}: {
+  commentId: string;
+  onDone: () => void;
+}) {
+  const { t, toast } = useStore();
+  const { sessionToken } = useAuth();
+  const react = useMutation(api.interactionsWire.reactToComment);
+  const [busy, setBusy] = useState(false);
+
+  const fire = async (r: QuickReaction) => {
+    if (!sessionToken || busy) return;
+    setBusy(true);
+    try {
+      const res = (await react({ sessionToken, commentId, reaction: r })) as { ok: boolean; error?: string };
+      if (!res.ok) toast(t(res.error === "rate_limited" ? "act.rateLimited" : "act.denied"));
+    } catch {
+      toast(t("act.denied"));
+    } finally {
+      setBusy(false);
+      onDone();
+    }
+  };
+
+  return (
+    <div
+      className="anim-rise"
+      style={{
+        position: "absolute",
+        bottom: "calc(100% + 6px)",
+        right: 0,
+        display: "flex",
+        gap: 6,
+        background: "var(--panel)",
+        border: "1px solid var(--line-strong)",
+        borderRadius: 999,
+        padding: "6px 10px",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+        zIndex: 60,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {QUICK_REACTIONS.map((r) => {
+        const Icon = QUICK_ICONS[r];
+        return (
+          <button
+            key={r}
+            onClick={() => void fire(r)}
+            title={t(`qr.${r}` as never)}
+            aria-label={t(`qr.${r}` as never)}
+            style={{ background: "none", border: "none", cursor: busy ? "wait" : "pointer", fontSize: 17, padding: 2, lineHeight: 1 }}
+          >
+            <Icon size={19} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function Feed() {
   const { t, allPosts } = useStore();
