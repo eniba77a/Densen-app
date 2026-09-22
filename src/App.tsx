@@ -19,6 +19,7 @@ import { UserProfilePage, TeamsPage, TeamDetailPage } from "./pages/Profile";
 import Create, { Duet, Remix } from "./pages/Create";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
+import Studio from "./pages/Studio";
 import Versions from "./pages/Versions";
 import Audio from "./pages/Audio";
 import Onboarding from "./pages/Onboarding";
@@ -90,6 +91,7 @@ function Shell() {
         <Route path="/versions/:postId" element={<Versions />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/studio" element={<Studio />} />
         <Route path="/audio" element={<Audio />} />
         <Route path="/legal/:docId" element={<LegalPage />} />
         <Route path="/privacy" element={<PrivacyRoute />} />

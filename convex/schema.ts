@@ -198,6 +198,7 @@ const loginAttempts = defineTable({
 const classes = defineTable({
   teacherId: v.id("users"),
   title: v.string(),
+  description: v.string(), // Day 8: class pages show a real description
   style: v.string(),
   difficulty: v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced")),
   coverUrl: v.string(),
@@ -206,11 +207,18 @@ const classes = defineTable({
    *  Dance-Credit unlocking without touching the money rails. */
   priceCents: v.number(),
   creditPrice: v.number(),
+  // Day 8 studio publishing (additive): duration + lifecycle extras.
+  durationSec: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
   status: publishStatus,
   createdAt: v.number(),
   updatedAt: v.number(),
 })
   .index("teacherId", ["teacherId"])
+  .index("by_teacher", ["teacherId", "createdAt"]) // Day 8 studio listing
   .index("by_style_status", ["style", "status"]);
 
 const moves = defineTable({
@@ -218,16 +226,45 @@ const moves = defineTable({
   style: v.string(),
   breakdownUrl: v.optional(v.string()),
   classId: v.optional(v.id("classes")),
+  // Day 8 studio publishing (additive — legacy seed rows have no owner):
+  teacherId: v.optional(v.id("users")),
+  description: v.optional(v.string()),
+  difficulty: v.optional(v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced"))),
+  durationSec: v.optional(v.number()),
+  priceCents: v.optional(v.number()),
+  creditPrice: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
+  status: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("unpublished"))),
   createdAt: v.number(),
-}).index("by_style", ["style"]);
+  updatedAt: v.optional(v.number()),
+})
+  .index("by_style", ["style"])
+  .index("by_teacher", ["teacherId", "createdAt"]);
 
 const combos = defineTable({
   name: v.string(),
   style: v.string(),
   moveIds: v.array(v.id("moves")),
   difficulty: v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced")),
+  // Day 8 studio publishing (additive):
+  teacherId: v.optional(v.id("users")),
+  description: v.optional(v.string()),
+  durationSec: v.optional(v.number()),
+  priceCents: v.optional(v.number()),
+  creditPrice: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
+  status: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("unpublished"))),
   createdAt: v.number(),
-}).index("by_style", ["style"]);
+  updatedAt: v.optional(v.number()),
+})
+  .index("by_style", ["style"])
+  .index("by_teacher", ["teacherId", "createdAt"]);
 
 const choreographies = defineTable({
   authorId: v.id("users"), // dancer or teacher
@@ -235,6 +272,18 @@ const choreographies = defineTable({
   comboId: v.optional(v.id("combos")),
   sourcePostId: v.optional(v.id("posts")), // born from a social post
   status: publishStatus,
+  // Day 8 studio publishing (additive):
+  description: v.optional(v.string()),
+  style: v.optional(v.string()),
+  difficulty: v.optional(v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced"))),
+  durationSec: v.optional(v.number()),
+  priceCents: v.optional(v.number()),
+  creditPrice: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
+  studioStatus: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("unpublished"))),
   createdAt: v.number(),
   updatedAt: v.number(),
 }).index("authorId", ["authorId"]);
@@ -249,17 +298,26 @@ const courses = defineTable({
   altText: v.string(),
   priceCents: v.number(), // 0 = free
   currency: v.string(), // ISO 4217, shown before purchase (transparency)
+  // Day 8 studio publishing (additive): credit unlock + lifecycle extras.
+  creditPrice: v.optional(v.number()),
+  durationSec: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
   status: publishStatus,
   createdAt: v.number(),
   updatedAt: v.number(),
 })
   .index("teacherId", ["teacherId"])
+  .index("by_teacher", ["teacherId", "createdAt"]) // Day 8 studio listing
   .index("by_style_status", ["style", "status"]);
 
 const lessons = defineTable({
   courseId: v.id("courses"),
   position: v.number(),
   title: v.string(),
+  description: v.optional(v.string()), // Day 8: lesson pages show what the drill teaches
   videoRef: v.optional(v.string()), // storage ref; metadata only, URLs signed at read time
   durationSec: v.number(),
   xpReward: v.number(),
@@ -555,9 +613,23 @@ const challenges = defineTable({
   // Safety screening result (dangerous-pattern scan before creation)
   safetyStatus: v.union(v.literal("cleared"), v.literal("flagged"), v.literal("blocked")),
   status: publishStatus,
+  // Day 8 studio publishing (additive) — teacher-created challenges:
+  teacherId: v.optional(v.id("users")),
+  style: v.optional(v.string()),
+  difficulty: v.optional(v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced"))),
+  durationSec: v.optional(v.number()),
+  priceCents: v.optional(v.number()),
+  creditPrice: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
+  visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
+  videoRef: v.optional(v.string()),
+  thumbnailRef: v.optional(v.string()),
+  studioStatus: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("unpublished"))),
   createdAt: v.number(),
   updatedAt: v.number(),
-}).index("by_status_deadline", ["status", "deadlineAt"]);
+})
+  .index("by_status_deadline", ["status", "deadlineAt"])
+  .index("by_teacher", ["teacherId", "createdAt"]);
 
 const challengeParticipants = defineTable({
   challengeId: v.id("challenges"),
