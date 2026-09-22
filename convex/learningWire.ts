@@ -13,6 +13,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { callerFromToken } from "./content";
+import { foldStreakForActivity } from "./arcadeInternals";
 import {
   decideCompletion,
   LESSON_COMPLETE_XP,
@@ -135,6 +136,8 @@ export const completeLesson = mutationGeneric({
     }
 
     // XP through the idempotent ledger (one grant per (user, reason, ref)).
+    // Day 9: the arcade ledger owns XP values; the lesson's own xpReward
+    // (teacher-authored) still takes precedence when higher than the base.
     const dup = await ctx.db
       .query("xpTransactions")
       .withIndex("by_reason", (q: any) => q.eq("reason", "lesson_complete"))
@@ -154,6 +157,8 @@ export const completeLesson = mutationGeneric({
         refId: args.lessonKey,
         createdAt: now,
       });
+      // Day 9 — completing a lesson is meaningful activity: fold the streak.
+      await foldStreakForActivity(ctx.db, c.caller.userId, now);
     }
 
     await ctx.db.insert("auditLogs", {

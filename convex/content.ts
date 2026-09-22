@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { sha256Hex } from "./authInternals";
 import { sessionValid } from "./sessionsInternals";
 import { decideVideoVisibility } from "./videoInternals";
+import { foldStreakForActivity, grantActivityXp } from "./arcadeInternals";
 import {
   scanCommentCore,
   scanGroomingCore,
@@ -494,6 +495,15 @@ export const createPost = mutationGeneric({
       summary: `post ${decision.status === "in_review" ? "held_for_review" : "published"}; rules:${scan.ruleIds.join("|") || "none"}`,
       createdAt: now,
     });
+
+    // Day 9 — meaningful content creation pays XP (published posts only;
+    // in_review pays nothing until a moderator clears it) and folds the
+    // streak. Server-decided amount, idempotent per post.
+    if (decision.status === "published") {
+      const pay = await grantActivityXp(ctx.db, caller.userId, caller.userStatus, "content_publish", postId, now);
+      if (pay.granted > 0) await foldStreakForActivity(ctx.db, caller.userId, now);
+    }
+
     return { ok: true as const, postId, status: decision.status };
   },
 });

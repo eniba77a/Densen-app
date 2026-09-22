@@ -9,6 +9,9 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as arcade from "../arcade.js";
+import type * as arcadeInternals from "../arcadeInternals.js";
+import type * as arcadeWire from "../arcadeWire.js";
 import type * as auditInternals from "../auditInternals.js";
 import type * as auth from "../auth.js";
 import type * as authInternals from "../authInternals.js";
@@ -40,6 +43,9 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  arcade: typeof arcade;
+  arcadeInternals: typeof arcadeInternals;
+  arcadeWire: typeof arcadeWire;
   auditInternals: typeof auditInternals;
   auth: typeof auth;
   authInternals: typeof authInternals;

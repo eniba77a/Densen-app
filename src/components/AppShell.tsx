@@ -146,6 +146,7 @@ const SIDE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) =
   { to: "/events", icon: IcCalendar, key: "nav.events" },
   { to: "/teams", icon: IcUsers, key: "nav.teams" },
   { to: "/progress", icon: IcFlame, key: "nav.progress" },
+  { to: "/arcade", icon: IcTrophy, key: "nav.arcade" },
   { to: "/profile", icon: IcUser, key: "nav.profile" },
   { to: "/studio", icon: IcLearn, key: "studio.title" },
 ];

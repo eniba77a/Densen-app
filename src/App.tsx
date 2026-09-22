@@ -10,6 +10,7 @@ import Learn from "./pages/Learn";
 import CourseDetail from "./pages/CourseDetail";
 import Lesson from "./pages/Lesson";
 import ProgressPage from "./pages/Progress";
+import Arcade from "./pages/Arcade";
 import { ChallengesPage, ChallengeDetail } from "./pages/Challenges";
 import { EventsPage, LivePage, LeaderboardsPage } from "./pages/EventsLive";
 import { MessagesPage, ChatPage, NotificationsRoute } from "./pages/Messages";
@@ -73,6 +74,7 @@ function Shell() {
         <Route path="/course/:courseId" element={<CourseDetail />} />
         <Route path="/lesson/:courseId/:lessonId" element={<Lesson />} />
         <Route path="/progress" element={<ProgressPage />} />
+        <Route path="/arcade" element={<Arcade />} />
         <Route path="/challenges" element={<ChallengesPage />} />
         <Route path="/challenge/:challengeId" element={<ChallengeDetail />} />
         <Route path="/events" element={<EventsPage />} />
