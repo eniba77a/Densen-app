@@ -8,6 +8,7 @@ import { useStore } from "../state/store";
 import { useGov } from "../state/governance";
 import { useAuth } from "../state/auth";
 import { courseById, fmt, userById } from "../data/store";
+import { useCatalogCourse } from "../data/useCatalogCourse";
 import { courseMinutes, pricingOf, whatYouLearn } from "../data/learning";
 import { money } from "../data/governance";
 import { Empty, Page } from "../components/ui";
@@ -20,7 +21,10 @@ export default function CourseDetail() {
   const { t, lang, isLessonDone, following, toggleFollow, saved, toggleSave, toast } = useStore();
   const gov = useGov();
   const auth = useAuth();
-  const c = courseId ? courseById(courseId) : undefined;
+  // Day 8 — resolve seed catalog ids instantly; Studio-published ids resolve
+  // through the live public catalog (reactive, guest-browsable).
+  const catalogItem = useCatalogCourse(courseId);
+  const c = catalogItem?.course ?? (courseId ? courseById(courseId) : undefined);
   const [playing, setPlaying] = useState(false);
   const [checkout, setCheckout] = useState(false);
 
@@ -49,11 +53,13 @@ export default function CourseDetail() {
 
   if (!c) return <Page><Empty icon="🔍" text="Course not found" /></Page>;
 
-  const teacher = userById(c.teacherId);
+  // Seed rows resolve their teacher from the store; Studio-published rows
+  // carry the server's public teacher projection.
+  const teacher = catalogItem?.teacher ?? userById(c.teacherId);
   const isFollowing = following.has(teacher.id);
   const isSaved = saved.has(c.id);
   const nextLesson = c.lessons.find((l) => !isDone(l.id)) ?? c.lessons[0];
-  const priced = pricingOf(c.id)!;
+  const priced = catalogItem?.pricing ?? pricingOf(c.id)!;
   const owned = gov.owns(c.id);
   const reviews = reviewsFor(c.id);
   const avg = averageRating(c.id);

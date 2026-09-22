@@ -147,6 +147,7 @@ const SIDE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) =
   { to: "/teams", icon: IcUsers, key: "nav.teams" },
   { to: "/progress", icon: IcFlame, key: "nav.progress" },
   { to: "/profile", icon: IcUser, key: "nav.profile" },
+  { to: "/studio", icon: IcLearn, key: "studio.title" },
 ];
 
 function Sidebar() {

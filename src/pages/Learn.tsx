@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { Bar } from "../components/ui";
 import { IcPlay } from "../components/icons";
 import { useStore } from "../state/store";
 import { courseById, courses } from "../data/store";
+import { mergeCatalog } from "../data/serverCatalog";
 import {
   CONTENT_TYPES,
   CONTENT_TYPE_META,
@@ -22,6 +25,8 @@ const LEVELS = ["All", "Beginner", "Intermediate", "Advanced", "Kids"] as const;
  * Full category set (Beginner…Professional), content-type filter
  * (MOVE/COMBO/CHOREOGRAPHY/CLASS/COURSE/LESSON), the START DANCING — FREE
  * beginner path, and honest live progress bars from the shared store.
+ * Day 8 — teacher publications merge in live from the server catalog:
+ * a verified teacher publishing in the Studio appears here reactively.
  */
 export default function Learn() {
   const { t, courseProgress } = useStore();
@@ -32,9 +37,13 @@ export default function Learn() {
   const [level, setLevel] = useState<(typeof LEVELS)[number]>("All");
   const [ctype, setCtype] = useState<"all" | ContentType>("all");
 
+  // Day 8 — public catalog bridge: published studio classes + courses.
+  const serverRows = useQuery(api.catalog.listPublishedAll, {});
+  const catalog = useMemo(() => mergeCatalog(courses, serverRows), [serverRows]);
+
   const list = useMemo(
     () =>
-      courses.filter((c) => {
+      catalog.filter((c) => {
         if (cat === "Beginner" && c.level !== "Beginner") return false;
         if (cat === "Advanced" && c.level !== "Advanced") return false;
         if (cat === "Professional" && c.level !== "Advanced") return false;
@@ -78,7 +87,7 @@ export default function Learn() {
           c.style.toLowerCase().includes(needle)
         );
       }),
-    [cat, level, q, ctype]
+    [cat, level, q, ctype, catalog]
   );
 
   const catLabel = (id: string): string =>

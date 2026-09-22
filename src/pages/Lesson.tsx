@@ -7,6 +7,7 @@ import { IcCheck, IcPause, IcPlay } from "../components/icons";
 import { useStore } from "../state/store";
 import { useAuth } from "../state/auth";
 import { courseById, userById } from "../data/store";
+import { useCatalogCourse } from "../data/useCatalogCourse";
 
 type Phase = "watch" | "learn" | "practice" | "done";
 
@@ -15,7 +16,10 @@ export default function Lesson() {
   const nav = useNavigate();
   const { t, isLessonDone, completeLesson, touchLesson, toast } = useStore();
   const auth = useAuth();
-  const course = courseId ? courseById(courseId) : undefined;
+  // Day 8 — seed ids resolve instantly; Studio-published ids resolve via the
+  // live public catalog so teacher lessons play with real server progress.
+  const catalogItem = useCatalogCourse(courseId);
+  const course = catalogItem?.course ?? (courseId ? courseById(courseId) : undefined);
   const lesson = course?.lessons.find((l) => l.id === lessonId);
 
   // Day 7 — real server progress: phase engagement and completion persist
@@ -234,7 +238,7 @@ export default function Lesson() {
         <LevelBadge level={course.level} />
         <span className="chip" style={{ fontSize: 11.5, padding: "4px 11px" }}>{course.style}</span>
         <span className="muted" style={{ fontSize: 12.5 }}>
-          {userById(course.teacherId).name}
+          {(catalogItem?.teacher?.name ?? userById(course.teacherId).name)}
         </span>
       </div>
 
