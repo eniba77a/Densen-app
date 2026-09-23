@@ -7,6 +7,7 @@
  * and content modules can import it without import cycles.
  */
 import { dayKeyFromTs, decideActivityXp, foldActivityDay, type ActivityKind, type StreakState } from "./arcade";
+import { earnCreditsFor } from "./creditsInternals";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -91,6 +92,9 @@ export async function foldStreakForActivity(db: any, userId: string, now: number
       refId: `day-${fold.next.current}`,
       createdAt: now,
     });
+    // Day 10 — streak milestones pay credits too (same refId probe:
+    // `streak:day-N` can only ever be rewarded once).
+    await earnCreditsFor(db, userId, "streak_milestone", `day-${fold.next.current}`, now);
   }
   return fold.milestoneXp;
 }
@@ -108,7 +112,7 @@ export async function grantActivityXp(
   kind: ActivityKind,
   refId: string | undefined,
   now: number
-): Promise<{ granted: number; error?: string }> {
+): Promise<{ granted: number; creditsGranted?: number; error?: string }> {
   const decision = decideActivityXp({
     caller: { userId, userStatus },
     kind,
@@ -126,5 +130,19 @@ export async function grantActivityXp(
     refId,
     createdAt: now,
   });
-  return { granted: decision.xp };
+  // Day 10 — qualifying completions also earn Dance Credits through the
+  // same idempotent probe (one credit reward per activity ever). Practice
+  // sessions and content publishes pay XP only (credits are for lessons,
+  // combos, choreographies and challenges; streaks pay via milestones).
+  let creditsGranted = 0;
+  if (
+    kind === "lesson_complete" ||
+    kind === "combo_complete" ||
+    kind === "choreography_complete" ||
+    kind === "challenge_complete"
+  ) {
+    const pay = await earnCreditsFor(db, userId, kind, refId, now);
+    if (pay.error === undefined) creditsGranted = pay.granted;
+  }
+  return { granted: decision.xp, creditsGranted };
 }

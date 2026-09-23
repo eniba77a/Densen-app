@@ -14,6 +14,7 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { callerFromToken } from "./content";
 import { foldStreakForActivity } from "./arcadeInternals";
+import { earnCreditsFor } from "./creditsInternals";
 import {
   decideCompletion,
   LESSON_COMPLETE_XP,
@@ -157,6 +158,9 @@ export const completeLesson = mutationGeneric({
         refId: args.lessonKey,
         createdAt: now,
       });
+      // Day 10 — the completion also earns Dance Credits (same probe:
+      // one reward per lesson ever; failed earns never block the XP path).
+      await earnCreditsFor(ctx.db, c.caller.userId, "lesson_complete", args.lessonKey, now);
       // Day 9 — completing a lesson is meaningful activity: fold the streak.
       await foldStreakForActivity(ctx.db, c.caller.userId, now);
     }
