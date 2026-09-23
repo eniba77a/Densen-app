@@ -47,18 +47,17 @@ async function xpBalance(db: any, userId: string): Promise<number> {
  * Record a meaningful dance activity and pay its XP. Called by the
  * learning/social surfaces when something MEANINGFUL completes; opening or
  * watching a video alone never routes here.
+ *
+ * Day 11 anti-farm tightening: completion kinds (lesson/combo/choreography/
+ * challenge) are NO LONGER client-reportable here — they pay only through
+ * their server-verified flows (lessonProgress completion, challenge
+ * submission+completion in challengesWire). This mutation keeps practice
+ * sessions (duration-gated) and content publishes (server-owned events).
  */
 export const recordActivity = mutationGeneric({
   args: {
     sessionToken: v.string(),
-    kind: v.union(
-      v.literal("lesson_complete"),
-      v.literal("combo_complete"),
-      v.literal("choreography_complete"),
-      v.literal("challenge_complete"),
-      v.literal("practice_session"),
-      v.literal("content_publish")
-    ),
+    kind: v.union(v.literal("practice_session"), v.literal("content_publish")),
     refId: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {

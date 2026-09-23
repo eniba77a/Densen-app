@@ -60,6 +60,7 @@ export default function Create() {
   const duetOf = params.get("duet");
   const convex = useConvex();
   const createPostLive = useMutation(api.content.createPost);
+  const submitEntry = useMutation(api.challengesWire.submitChallengeEntry);
 
   const [source, setSource] = useState<"upload" | "record" | "photo">("upload");
   const [caption, setCaption] = useState(challengeId ? "My entry for the weekly challenge 🔥" : "");
@@ -191,6 +192,19 @@ export default function Create() {
           duetOfPostId: duetOf ?? undefined,
         });
         if (res?.ok) {
+          // Day 11 — publishing from a challenge context auto-submits the
+          // new post as the entry (server verifies ownership; review applies).
+          if (challengeId && auth.sessionToken) {
+            try {
+              await submitEntry({
+                sessionToken: auth.sessionToken,
+                challengeId,
+                postId: String(res.postId),
+              });
+            } catch {
+              // best-effort: the dancer can still link the post on the page
+            }
+          }
           setPublishedId(String(res.postId));
         } else {
           if (res.error === "reuse_not_allowed") {

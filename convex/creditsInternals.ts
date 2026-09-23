@@ -90,7 +90,8 @@ export async function earnCreditsFor(
   userId: string,
   source: CreditSource,
   refId: string | undefined,
-  now: number
+  now: number,
+  amountOverride?: number
 ): Promise<{ granted: number; error?: string }> {
   const reason = reasonFor(source);
 
@@ -130,9 +131,11 @@ export async function earnCreditsFor(
   });
   if (decision.action === "deny") return { granted: 0, error: decision.error };
 
+  const credits = Math.max(0, amountOverride ?? decision.credits);
+  if (credits === 0) return { granted: 0 };
   const balance = await currentBalance(db, userId);
-  const balanceAfter = balance + decision.credits;
+  const balanceAfter = balance + credits;
   // refType = source: per-source idempotency inside one ledger reason.
-  await appendCreditTx(db, userId, decision.credits, reason, source, refId, balanceAfter, now);
-  return { granted: decision.credits };
+  await appendCreditTx(db, userId, credits, reason, source, refId, balanceAfter, now);
+  return { granted: credits };
 }

@@ -15,6 +15,7 @@ import { v } from "convex/values";
 import { callerFromToken } from "./content";
 import { foldStreakForActivity } from "./arcadeInternals";
 import { earnCreditsFor } from "./creditsInternals";
+import { evaluateAchievements, statsFor } from "./achievementsInternals";
 import {
   decideCompletion,
   LESSON_COMPLETE_XP,
@@ -163,6 +164,8 @@ export const completeLesson = mutationGeneric({
       await earnCreditsFor(ctx.db, c.caller.userId, "lesson_complete", args.lessonKey, now);
       // Day 9 — completing a lesson is meaningful activity: fold the streak.
       await foldStreakForActivity(ctx.db, c.caller.userId, now);
+      // Day 11 — lessons feed the achievement evaluator (FIRST STEP at 1).
+      await evaluateAchievements(ctx.db, c.caller.userId, c.user.status, await statsFor(ctx.db, c.caller.userId), now);
     }
 
     await ctx.db.insert("auditLogs", {

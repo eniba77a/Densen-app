@@ -111,7 +111,8 @@ export async function grantActivityXp(
   userStatus: string,
   kind: ActivityKind,
   refId: string | undefined,
-  now: number
+  now: number,
+  overrides?: { xp?: number; credits?: number }
 ): Promise<{ granted: number; creditsGranted?: number; error?: string }> {
   const decision = decideActivityXp({
     caller: { userId, userStatus },
@@ -122,9 +123,10 @@ export async function grantActivityXp(
     now,
   });
   if (decision.action === "deny") return { granted: 0, error: decision.error };
+  const grantedXp = Math.max(0, overrides?.xp ?? decision.xp);
   await db.insert("xpTransactions", {
     userId: userId as never,
-    amount: decision.xp,
+    amount: grantedXp,
     reason: kind,
     refType: kind === "content_publish" ? "post" : kind.split("_")[0],
     refId,
@@ -141,8 +143,8 @@ export async function grantActivityXp(
     kind === "choreography_complete" ||
     kind === "challenge_complete"
   ) {
-    const pay = await earnCreditsFor(db, userId, kind, refId, now);
+    const pay = await earnCreditsFor(db, userId, kind, refId, now, overrides?.credits);
     if (pay.error === undefined) creditsGranted = pay.granted;
   }
-  return { granted: decision.xp, creditsGranted };
+  return { granted: grantedXp, creditsGranted };
 }
