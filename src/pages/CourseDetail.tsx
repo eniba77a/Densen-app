@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useMutation } from "convex/react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -27,6 +28,16 @@ export default function CourseDetail() {
   const c = catalogItem?.course ?? (courseId ? courseById(courseId) : undefined);
   const [playing, setPlaying] = useState(false);
   const [checkout, setCheckout] = useState(false);
+  const [spending, setSpending] = useState(false);
+
+  // Day 10 — real Dance-Credits unlock: the button below spends from the
+  // server-authoritative ledger (never local state). Replay-safe via the
+  // ledger's refId probe; balance and history are reactive subscriptions.
+  const spendCredits = useMutation(api.creditsWire.spendCredits);
+  const myCredits = useQuery(
+    api.creditsWire.getMyCredits,
+    auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
+  );
 
   // Day 7 — live server progress: completion status and the % bar are a
   // reactive Convex subscription, so a completed lesson updates here and on
@@ -61,6 +72,14 @@ export default function CourseDetail() {
   const nextLesson = c.lessons.find((l) => !isDone(l.id)) ?? c.lessons[0];
   const priced = catalogItem?.pricing ?? pricingOf(c.id)!;
   const owned = gov.owns(c.id);
+  // Day 10 — server-side unlock state: a recorded credit spend for this
+  // class in the ledger means unlocked, regardless of local mirrors.
+  const serverOwned =
+    myCredits?.ok === true &&
+    Array.isArray(myCredits.history) &&
+    myCredits.history.some((h) => h.refId === `class:${c.id}` && h.amount < 0);
+  const unlocked = owned || serverOwned;
+  const creditBalance = myCredits?.ok === true ? myCredits.balance : null;
   const reviews = reviewsFor(c.id);
   const avg = averageRating(c.id);
   const minutes = courseMinutes(c);
@@ -170,7 +189,7 @@ export default function CourseDetail() {
       {/* Day 7 — pricing architecture: FREE / PAID / CREDITS / PAID+CREDITS.
           No fake payments: PAID shows an honest "checkout coming soon" state;
           CREDITS are real (ledger-backed) and unlock today. */}
-      <div className="panel" style={{ padding: 16, marginBottom: 22, borderColor: owned || access === "free" ? "rgba(74,222,128,0.35)" : "var(--gold-line)" }}>
+      <div className="panel" style={{ padding: 16, marginBottom: 22, borderColor: unlocked || access === "free" ? "rgba(74,222,128,0.35)" : "var(--gold-line)" }}>
         {access === "free" && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <StatusPill status="pass" label={t("learn.access.free")} />
@@ -187,7 +206,7 @@ export default function CourseDetail() {
               </strong>
               <span className="faint" style={{ fontSize: 12 }}>{t("gov.buy.fees")}: {t("gov.buy.feesValue")}</span>
             </div>
-            {owned ? (
+            {unlocked ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
                 <StatusPill status="pass" label={t("gov.owned")} />
                 <button className="btn btn-sm" onClick={() => nav("/settings#purchases")}>↩️ {t("gov.refund.request")}</button>
@@ -200,9 +219,41 @@ export default function CourseDetail() {
                   </button>
                 )}
                 {access !== "paid" && (
-                  <button className="btn" style={{ width: "100%", marginTop: 10, borderColor: "var(--gold-line)" }} onClick={() => setCheckout(true)}>
-                    ✦ {t("learn.unlockCredits")} — {priced.creditPrice} {t("learn.credits")}
+                  <button
+                    className="btn"
+                    style={{ width: "100%", marginTop: 10, borderColor: "var(--gold-line)" }}
+                    disabled={spending || creditBalance === null}
+                    onClick={async () => {
+                      if (!auth.sessionToken || creditBalance === null) return;
+                      setSpending(true);
+                      try {
+                        const r = await spendCredits({
+                          sessionToken: auth.sessionToken,
+                          amount: priced.creditPrice,
+                          courseKey: c.id,
+                        });
+                        if (r.ok) {
+                          gov.buyCourse(c.id); // client mirror (purchase terms consent flow)
+                          toast(`${t("learn.unlockedToast")} ✦`);
+                        } else if (r.error === "insufficient_credits") {
+                          toast(t("learn.err.insufficient"));
+                        } else if (r.error === "duplicate_unlock") {
+                          toast(t("learn.err.duplicate"));
+                        } else {
+                          toast(t("common.error"));
+                        }
+                      } finally {
+                        setSpending(false);
+                      }
+                    }}
+                  >
+                    {spending ? t("learn.unlocking") : `✦ ${t("learn.unlockCredits")} — ${priced.creditPrice} ${t("learn.credits")}`}
                   </button>
+                )}
+                {creditBalance !== null && (
+                  <p className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
+                    ✦ {t("learn.yourCredits")}: <strong className="gold-text">{creditBalance}</strong>
+                  </p>
                 )}
                 <p className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
                   {t("learn.checkoutSoon")} · {t("gov.buy.refundDesc")} <button onClick={() => nav("/legal/refunds")} style={{ background: "none", border: "none", color: "var(--gold)", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 11.5 }}>{t("gov.buy.refund")} →</button>

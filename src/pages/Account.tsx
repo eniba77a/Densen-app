@@ -136,6 +136,7 @@ export default function Account() {
         </div>
         {profileForm()}
         {sessionToken ? <ChangePassword sessionToken={sessionToken} /> : null}
+        <CreditsPanel sessionToken={sessionToken} />
         <button className="btn" style={{ width: "100%", justifyContent: "center", marginTop: 14 }} onClick={doSignOut}>
           {t("account.signout")}
         </button>
@@ -203,6 +204,60 @@ export default function Account() {
 }
 
 /* ---------------------- Change password (authenticated) ---------------------- */
+
+/**
+ * Day 10 — Dance Credits panel: the live balance and the transaction
+ * history, straight from the creditTransactions ledger (reactive).
+ * Credits are earned through verified dance activity — there is no way
+ * to buy or mint them from the client, by design.
+ */
+/** Ledger reason → i18n key (typed lookup keeps t() strict). */
+const CREDIT_REASON_KEYS = {
+  earn: "credits.reason.earn",
+  purchase: "credits.reason.purchase",
+  spend: "credits.reason.spend",
+  reward: "credits.reason.reward",
+  refund: "credits.reason.refund",
+  expire: "credits.reason.expire",
+  admin_adjust: "credits.reason.admin_adjust",
+  reaction: "credits.reason.reaction",
+} as const;
+
+function CreditsPanel({ sessionToken }: { sessionToken?: string | null }) {
+  const { t } = useStore();
+  const my = useQuery(
+    api.creditsWire.getMyCredits,
+    sessionToken ? { sessionToken } : "skip"
+  );
+  if (!sessionToken || my?.ok !== true) return null;
+  const rows = my.history as { amount: number; reason: string; refType?: string; refId?: string; balanceAfter: number; at: number }[];
+  return (
+    <div className="panel" style={{ padding: 16, marginBottom: 14, borderColor: "var(--gold-line)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>✦ {t("credits.title")}</h2>
+        <strong className="gold-text" style={{ fontSize: 26 }}>{my.balance}</strong>
+      </div>
+      <p className="faint" style={{ fontSize: 11.5, margin: "4px 0 10px" }}>{t("credits.subtitle")}</p>
+      {rows.length === 0 ? (
+        <p className="faint" style={{ fontSize: 12.5 }}>{t("credits.empty")}</p>
+      ) : (
+        <div style={{ display: "grid", gap: 6 }}>
+          {rows.slice(0, 12).map((r, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, borderBottom: "1px solid var(--line)", padding: "6px 0" }}>
+              <span style={{ fontWeight: 700, minWidth: 44, color: r.amount >= 0 ? "var(--ok, #4ade80)" : "var(--gold)" }}>
+                {r.amount >= 0 ? `+${r.amount}` : r.amount}
+              </span>
+              <span className="muted" style={{ flex: 1 }}>
+                {t(CREDIT_REASON_KEYS[r.reason as keyof typeof CREDIT_REASON_KEYS] ?? "credits.reason.reward")}
+              </span>
+              <span className="faint" style={{ fontSize: 11 }}>{new Date(r.at).toLocaleDateString()}</span>
+              <span className="faint" style={{ fontSize: 11 }}>✦ {r.balanceAfter}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );}
 
 function ChangePassword({ sessionToken }: { sessionToken: string }) {
   const { t } = useStore();
