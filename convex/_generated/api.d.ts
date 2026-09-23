@@ -29,6 +29,8 @@ import type * as interactionsWire from "../interactionsWire.js";
 import type * as learning from "../learning.js";
 import type * as learningWire from "../learningWire.js";
 import type * as media from "../media.js";
+import type * as practice from "../practice.js";
+import type * as practiceWire from "../practiceWire.js";
 import type * as privacy from "../privacy.js";
 import type * as privacyInternals from "../privacyInternals.js";
 import type * as profiles from "../profiles.js";
@@ -70,6 +72,8 @@ declare const fullApi: ApiFromModules<{
   learning: typeof learning;
   learningWire: typeof learningWire;
   media: typeof media;
+  practice: typeof practice;
+  practiceWire: typeof practiceWire;
   privacy: typeof privacy;
   privacyInternals: typeof privacyInternals;
   profiles: typeof profiles;

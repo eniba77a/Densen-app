@@ -430,6 +430,9 @@ function FeedCard({
 
   const { sessionToken } = useAuth();
   const interact = useMutation(api.interactionsWire.interact);
+  // Day 12 — the PRACTICE action also creates the real MY PRACTICE item
+  // (idempotent server-side per contentRef) so saves live in the workspace.
+  const savePractice = useMutation(api.practiceWire.saveItem);
 
   // REACTIVE DENSEN counters + my active interactions — a live Convex
   // subscription. Any interaction by anyone (this device or another) updates
@@ -691,7 +694,25 @@ function FeedCard({
         {/* PRIMARY: 💃 MOVE — reactive count (server rows, live) */}
         <ActionBtn icon={<IcMove size={24} />} label={fmt((post.shares ?? 0) + (liveCounts.move ?? 0))} onClick={() => void doAction("move", t("act.moved"))} />
         {/* PRIMARY: 🎯 PRACTICE — reactive count (server rows, live) */}
-        <ActionBtn icon={<IcPractice size={24} filled={mineSet.has("practice") || isSaved} />} label={fmt(liveCounts.practice ?? 0)} active={mineSet.has("practice") || isSaved} onClick={() => void doAction("practice", mineSet.has("practice") ? t("act.practiceRemoved") : t("act.practiced"))} />
+        <ActionBtn
+          icon={<IcPractice size={24} filled={mineSet.has("practice") || isSaved} />}
+          label={fmt(liveCounts.practice ?? 0)}
+          active={mineSet.has("practice") || isSaved}
+          onClick={() => {
+            const removing = mineSet.has("practice");
+            void doAction("practice", removing ? t("act.practiceRemoved") : t("act.practiced"));
+            if (!removing && sessionToken) {
+              void savePractice({
+                sessionToken,
+                kind: "choreography",
+                title: post.caption.slice(0, 80) || "Dance video",
+                style: post.style,
+                contentRef: post.id,
+                href: "/feed",
+              });
+            }
+          }}
+        />
         {/* SECONDARY: 🔁 REMIX · 👯 DUET · ⚡ BOOST · 🏆 CHALLENGE */}
         <ActionBtn icon={<IcRemix size={23} />} label={t("act.remix")} onClick={() => nav(`/remix/${post.id}`)} />
         {duetAllowed ? (
