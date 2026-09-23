@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { Avatar, Bar, Empty, LevelBadge, Page } from "../components/ui";
 import { IcMapPin, IcPlay, IcSettings, IcVerified } from "../components/icons";
 import { ME, useStore } from "../state/store";
@@ -162,9 +164,53 @@ const profileCover = (id: string) =>
   })[id] ?? IMG.extra7;
 
 /* ---------------- generic user profile ---------------- */
+/**
+ * Day 11 — the profile's ACHIEVEMENTS tab shows the server-unlocked badges
+ * (auto-awarded `userAchievements` rows) with the catalog progress beneath.
+ */
+function ServerAchievements({ userId }: { userId: string }) {
+  const { t, achievements } = useStore();
+  const live = useQuery(api.challengesWire.listAchievements, { userId });
+  const unlocked = live?.ok ? (live.achievements as { code: string; unlockedAt: number }[]) : [];
+  const unlockedSet = new Set(unlocked.map((u) => u.code));
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+      {achievements.map((a) => {
+        const isUnlocked = unlockedSet.has(String(a.id).replace("ach_", ""));
+        return (
+          <div
+            key={a.id}
+            className="panel"
+            style={{
+              padding: 14,
+              textAlign: "center",
+              opacity: isUnlocked ? 1 : 0.55,
+              borderColor: isUnlocked ? "var(--gold-line)" : "var(--line)",
+            }}
+          >
+            <div style={{ fontSize: 28, marginBottom: 6 }}>{a.icon}</div>
+            <div style={{ fontWeight: 700, fontSize: 12.5 }}>{a.name}</div>
+            <div className="faint" style={{ fontSize: 11, marginTop: 3 }}>{a.desc}</div>
+            {isUnlocked ? (
+              <div style={{ marginTop: 8, color: "var(--gold)", fontWeight: 800, fontSize: 11.5 }}>🏅 {t("arcade.unlocked")}</div>
+            ) : (
+              a.progress !== undefined && (
+                <div style={{ marginTop: 8 }}>
+                  <Bar pct={a.progress} />
+                </div>
+              )
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function UserProfilePage() {
   const { userId } = useParams();
-  const { t, achievements, saved } = useStore();
+  const { t, saved } = useStore();
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>("videos");
 
@@ -232,29 +278,7 @@ export function UserProfilePage() {
         )}
 
         {tab === "achievements" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
-            {achievements.map((a) => (
-              <div
-                key={a.id}
-                className="panel"
-                style={{
-                  padding: 14,
-                  textAlign: "center",
-                  opacity: a.unlocked ? 1 : 0.55,
-                  borderColor: a.unlocked ? "var(--gold-line)" : "var(--line)",
-                }}
-              >
-                <div style={{ fontSize: 28, marginBottom: 6 }}>{a.icon}</div>
-                <div style={{ fontWeight: 700, fontSize: 12.5 }}>{a.name}</div>
-                <div className="faint" style={{ fontSize: 11, marginTop: 3 }}>{a.desc}</div>
-                {!a.unlocked && a.progress !== undefined && (
-                  <div style={{ marginTop: 8 }}>
-                    <Bar pct={a.progress} />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <ServerAchievements userId={userId} />
         )}
 
         {(tab === "courses") && (

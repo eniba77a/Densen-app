@@ -610,6 +610,18 @@ const challenges = defineTable({
   tutorialCourseId: v.optional(v.id("courses")),
   deadlineAt: v.optional(v.number()),
   participantCount: v.number(),
+  // Day 11 (additive) — full challenge lifecycle:
+  startsAt: v.optional(v.number()), // undefined = open now (no scheduled start)
+  rules: v.optional(v.string()), // human-readable participation rules
+  /** Structured reward definition. xp/credits pay through the Day 9/10
+   *  ledger helpers (idempotent per user+refId); badge pays by code. */
+  reward: v.optional(
+    v.object({
+      xp: v.optional(v.number()),
+      credits: v.optional(v.number()),
+      badgeCode: v.optional(v.string()), // achievement code granted on completion
+    })
+  ),
   // Safety screening result (dangerous-pattern scan before creation)
   safetyStatus: v.union(v.literal("cleared"), v.literal("flagged"), v.literal("blocked")),
   status: publishStatus,
@@ -639,6 +651,25 @@ const challengeParticipants = defineTable({
 })
   .index("by_challenge", ["challengeId"]) // participant list + leaderboard
   .index("by_user", ["userId"]); // "my challenges"
+
+/**
+ * Day 11 — one video submission per (challenge, user). The post itself stays
+ * in `posts` (never duplicated); a submission is a moderation-screened join
+ * to the participant's entry. Status lifecycle mirrors posts: pending →
+ * cleared | rejected (safety), rejected submissions are never completable.
+ */
+const challengeSubmissions = defineTable({
+  challengeId: v.id("challenges"),
+  userId: v.id("users"),
+  postId: v.id("posts"),
+  /** Server-computed progress snapshot at submit time (0-100). */
+  progressPct: v.number(),
+  status: v.union(v.literal("pending"), v.literal("cleared"), v.literal("rejected")),
+  createdAt: v.number(),
+})
+  .index("by_challenge_user", ["challengeId", "userId"]) // uniqueness lookup
+  .index("by_user", ["userId"])
+  .index("by_challenge", ["challengeId"]);
 
 const xpTransactions = defineTable({
   userId: v.id("users"),
@@ -703,7 +734,9 @@ const achievements = defineTable({
 
 const userAchievements = defineTable({
   userId: v.id("users"),
-  achievementId: v.id("achievements"),
+  /** The catalog CODE (stable achievement reference — codes are permanent by
+   *  design, matching the `achievement:<code>` ledger refs). */
+  achievementId: v.string(),
   progress: v.number(), // 0-100 until unlocked
   unlockedAt: v.optional(v.number()),
   createdAt: v.number(),
@@ -1002,6 +1035,7 @@ export default defineSchema({
   notifications,
   challenges,
   challengeParticipants,
+  challengeSubmissions,
   xpTransactions,
   danceCredits,
   creditTransactions,

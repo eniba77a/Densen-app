@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { Avatar, LevelBadge, Page } from "../components/ui";
 import { IcPlay, IcSearch, IcVerified } from "../components/icons";
 import { useStore } from "../state/store";
-import { challenges, courses, fmt, hashtags, users } from "../data/store";
+import { courses, fmt, hashtags, users } from "../data/store";
 
 type Tab = "all" | "dancers" | "courses" | "challenges" | "hashtags" | "videos";
 
@@ -14,6 +16,29 @@ export default function Discover() {
   const q = params.get("q") ?? "";
   const [input, setInput] = useState(q);
   const [tab, setTab] = useState<Tab>("all");
+
+  // Day 11 — live challenge catalog joins the discovery results.
+  const serverChallenges = useQuery(api.challengesWire.listChallenges, {});
+  const liveChallenges = useMemo(() => {
+    if (!serverChallenges?.ok) return [];
+    return (serverChallenges.challenges as {
+      id: string;
+      title: string;
+      style?: string;
+      phase: string;
+      daysLeft: number;
+      participantCount: number;
+      hasCompleted: boolean;
+    }[]).map((c) => ({
+      id: c.id,
+      title: c.title,
+      style: c.style ?? "DENSEN",
+      participants: c.participantCount,
+      daysLeft: c.daysLeft,
+      phase: c.phase,
+      hasCompleted: c.hasCompleted,
+    }));
+  }, [serverChallenges]);
 
   const runSearch = (value: string) => setParams(value ? { q: value } : {});
 
@@ -32,10 +57,10 @@ export default function Discover() {
       courses: courses.filter(
         (c) => c.title.toLowerCase().includes(s) || c.style.toLowerCase().includes(strip)
       ),
-      challenges: challenges.filter((c) => c.title.toLowerCase().includes(s) || c.style.toLowerCase().includes(strip)),
+      challenges: liveChallenges.filter((c) => c.title.toLowerCase().includes(s) || c.style.toLowerCase().includes(strip)),
       tags: hashtags.filter((h) => h.tag.toLowerCase().includes(strip ? `#${strip}` : s)),
     };
-  }, [q]);
+  }, [q, liveChallenges]);
 
   const trending = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -45,9 +70,9 @@ export default function Discover() {
     return {
       dancers: [...users].sort((a, b) => b.followers - a.followers).slice(0, 6),
       courses: courses.slice(0, 4),
-      challenges: challenges.filter((c) => c.status === "active").slice(0, 3),
+      challenges: liveChallenges.filter((c) => c.phase === "active").slice(0, 3),
     };
-  }, [q, res]);
+  }, [q, res, liveChallenges]);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "all", label: t("discover.all") },
@@ -175,11 +200,13 @@ export default function Discover() {
                 className="panel panel-hover"
                 style={{ display: "flex", gap: 13, padding: 12, alignItems: "center", cursor: "pointer", textAlign: "left", color: "inherit", width: "100%" }}
               >
-                <img src={ch.cover} alt="" style={{ width: 76, height: 58, borderRadius: 11, objectFit: "cover", flexShrink: 0 }} />
+                <span style={{ width: 76, height: 58, borderRadius: 11, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, background: "linear-gradient(135deg, var(--gold-line), var(--panel-2))", opacity: 0.85 }}>
+                  🏁
+                </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{ch.title}</div>
                   <div className="faint" style={{ fontSize: 12, marginTop: 3 }}>
-                    🔥 {fmt(ch.participants)} {t("challenges.participants")} · {ch.daysLeft > 0 ? `${ch.daysLeft} ${t("challenges.daysLeft")}` : ch.deadline}
+                    🔥 {fmt(ch.participants)} {t("challenges.participants")} · {ch.phase === "active" && ch.daysLeft > 0 ? `${ch.daysLeft} ${t("challenges.daysLeft")}` : ch.phase}
                   </div>
                 </div>
                 <IcPlay size={16} />

@@ -17,6 +17,7 @@ import { sha256Hex } from "./authInternals";
 import { sessionValid } from "./sessionsInternals";
 import { decideVideoVisibility } from "./videoInternals";
 import { foldStreakForActivity, grantActivityXp } from "./arcadeInternals";
+import { evaluateAchievements, statsFor } from "./achievementsInternals";
 import {
   scanCommentCore,
   scanGroomingCore,
@@ -501,7 +502,11 @@ export const createPost = mutationGeneric({
     // streak. Server-decided amount, idempotent per post.
     if (decision.status === "published") {
       const pay = await grantActivityXp(ctx.db, caller.userId, caller.userStatus, "content_publish", postId, now);
-      if (pay.granted > 0) await foldStreakForActivity(ctx.db, caller.userId, now);
+      if (pay.granted > 0) {
+        await foldStreakForActivity(ctx.db, caller.userId, now);
+        // Day 11 — posts feed the achievement evaluator (CREATOR at 5).
+        await evaluateAchievements(ctx.db, caller.userId, caller.userStatus, await statsFor(ctx.db, caller.userId), now);
+      }
     }
 
     return { ok: true as const, postId, status: decision.status };

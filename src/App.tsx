@@ -1,4 +1,7 @@
+import { useEffect } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
+import { useMutation } from "convex/react";
+import { api } from "../convex/_generated/api";
 import { AppShell } from "./components/AppShell";
 import { StoreProvider, useStore } from "./state/store";
 import { GovernanceProvider, useGov } from "./state/governance";
@@ -49,6 +52,15 @@ function Providers({ children }: { children: React.ReactNode }) {
 function Shell() {
   const { pathname } = useLocation();
   const { onboarded } = useGov();
+
+  // Day 11 — one idempotent platform bootstrap per load: seeds the
+  // achievements catalog and the platform challenge rows (queries cannot
+  // write in Convex, so seeding is a mutation the shell fires).
+  const bootstrapPlatform = useMutation(api.challengesWire.bootstrapPlatform);
+  useEffect(() => {
+    void bootstrapPlatform({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // First visit: the consent moment. Legal/footer pages stay reachable.
   const isGovernanceRoute = ["/welcome", "/legal", "/privacy", "/safety", "/business", "/unsubscribe"].some((p) => pathname.startsWith(p));

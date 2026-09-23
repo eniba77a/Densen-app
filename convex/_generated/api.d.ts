@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as achievements from "../achievements.js";
+import type * as achievementsInternals from "../achievementsInternals.js";
 import type * as admin from "../admin.js";
 import type * as arcade from "../arcade.js";
 import type * as arcadeInternals from "../arcadeInternals.js";
@@ -16,6 +18,8 @@ import type * as auditInternals from "../auditInternals.js";
 import type * as auth from "../auth.js";
 import type * as authInternals from "../authInternals.js";
 import type * as catalog from "../catalog.js";
+import type * as challenges from "../challenges.js";
+import type * as challengesWire from "../challengesWire.js";
 import type * as content from "../content.js";
 import type * as credits from "../credits.js";
 import type * as creditsInternals from "../creditsInternals.js";
@@ -45,6 +49,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  achievements: typeof achievements;
+  achievementsInternals: typeof achievementsInternals;
   admin: typeof admin;
   arcade: typeof arcade;
   arcadeInternals: typeof arcadeInternals;
@@ -53,6 +59,8 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authInternals: typeof authInternals;
   catalog: typeof catalog;
+  challenges: typeof challenges;
+  challengesWire: typeof challengesWire;
   content: typeof content;
   credits: typeof credits;
   creditsInternals: typeof creditsInternals;

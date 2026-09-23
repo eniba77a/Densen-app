@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Bar, Empty, Page, Ring, StatCard } from "../components/ui";
@@ -6,6 +7,16 @@ import { IcFlame } from "../components/icons";
 import { useStore } from "../state/store";
 import { useAuth } from "../state/auth";
 import type { TKey } from "../i18n";
+
+/** Live challenge view (subset) for the Arcade strips. */
+type ServerChallengeLite = {
+  id: string;
+  title: string;
+  phase: "upcoming" | "active" | "ended";
+  hasJoined: boolean;
+  hasCompleted: boolean;
+  reward: { xp?: number; credits?: number; badgeCode?: string };
+};
 
 /**
  * DENSEN ARCADE (Day 9).
@@ -23,6 +34,13 @@ export default function Arcade() {
     auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
   );
   const config = useQuery(api.arcadeWire.getArcadeConfig, {});
+
+  // Day 11 — live achievement unlocks from the server (auto-awarded), plus
+  // the legacy ledger-derived progress chips kept as the "in progress" view.
+  const unlocked = useQuery(
+    api.challengesWire.listAchievements,
+    auth.sessionToken && auth.viewer ? { userId: auth.viewer.userId } : "skip"
+  );
 
   // Achievements are derived from the ledger (server truth), not local state.
   const achievements = useMemo(() => {
@@ -44,7 +62,18 @@ export default function Arcade() {
       unlocked: a.have >= a.need,
       pct: Math.min(100, Math.round((a.have / a.need) * 100)),
     }));
-  }, [stats]);
+  }, [stats, unlocked]);
+
+  // Challenge completions + active challenges strip (Day 11 integration).
+  const challengeList = useQuery(api.challengesWire.listChallenges, {});
+  const myChallenges = useMemo(() => {
+    if (!challengeList?.ok) return { joined: [] as ServerChallengeLite[], active: [] as ServerChallengeLite[] };
+    const all = challengeList.challenges as ServerChallengeLite[];
+    return {
+      joined: all.filter((c) => c.hasJoined),
+      active: all.filter((c) => c.phase === "active"),
+    };
+  }, [challengeList]);
 
   if (!auth.sessionToken || (stats && !stats.ok)) {
     return (
@@ -63,6 +92,7 @@ export default function Arcade() {
 
   const pctToNext = stats.atCap ? 100 : Math.round((stats.xpIntoLevel / Math.max(1, stats.xpForLevel ?? 1)) * 100);
   const ladder: { level: number; name: string; xpRequired: number }[] = config?.ok ? config.ladder : [];
+  const nav = useNavigate();
 
   return (
     <Page>
@@ -184,9 +214,46 @@ export default function Arcade() {
         </div>
       )}
 
+      {/* challenges (Day 11) — joined + active strip */}
+      {(myChallenges.joined.length > 0 || myChallenges.active.length > 0) && (
+      <div className="panel" style={{ padding: 18, marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>{t("arcade.challenges")}</div>
+          <button className="btn btn-ghost btn-sm" onClick={() => nav("/challenges")}>{t("nav.challenges")} →</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 10 }}>
+          {(myChallenges.joined.length > 0 ? myChallenges.joined : myChallenges.active).slice(0, 6).map((c) => (
+            <button
+              key={c.id}
+              onClick={() => nav(`/challenge/${c.id}`)}
+              className="chip"
+              style={{ textAlign: "left", cursor: "pointer", borderColor: c.hasCompleted ? "var(--gold-line)" : "var(--line)" }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.hasCompleted ? "🏆 " : c.hasJoined ? "🎯 " : "🏁 "}{c.title}
+              </div>
+              <div className="faint" style={{ fontSize: 11 }}>
+                {c.hasCompleted ? t("challenges.completed") : c.hasJoined ? t("challenges.joined") : `+${c.reward.xp ?? 0} XP`}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+      )}
+
       {/* achievements */}
       <div className="panel" style={{ padding: 18, marginBottom: 16 }}>
         <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12 }}>{t("arcade.achievements")}</div>
+        {/* server-unlocked badges (Day 11 auto-award — real userAchievements rows) */}
+        {unlocked?.ok && (unlocked.achievements as { code: string }[]).length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {(unlocked.achievements as { code: string }[]).map((ua) => (
+              <span key={ua.code} className="chip active" style={{ fontSize: 12 }}>
+                🏅 {t(`arcade.badge.${ua.code}` as never)}
+              </span>
+            ))}
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
           {achievements.map((a) => (
             <div
