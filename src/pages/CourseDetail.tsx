@@ -18,6 +18,7 @@ import { averageRating, reviewsFor, refundStatusNote } from "../data/governance"
 
 export default function CourseDetail() {
   const { courseId } = useParams();
+  const savePractice = useMutation(api.practiceWire.saveItem);
   const nav = useNavigate();
   const { t, lang, isLessonDone, following, toggleFollow, saved, toggleSave, toast } = useStore();
   const gov = useGov();
@@ -181,7 +182,26 @@ export default function CourseDetail() {
         <button className="btn btn-primary" style={{ flex: 1, minWidth: 200 }} onClick={() => nav(`/lesson/${c.id}/${nextLesson.id}`)}>
           {pct > 0 ? t("learn.continueCourse") : t("learn.startCourse")} <IcPlay size={15} />
         </button>
-        <button className="btn" onClick={() => { toggleSave(c.id); toast(isSaved ? "Removed" : t("common.saved")); }}>
+        <button
+          className="btn"
+          onClick={() => {
+            toggleSave(c.id);
+            // Day 12 — the bookmark also creates the real MY PRACTICE item
+            // (idempotent per contentRef) with the class step plan.
+            if (auth.sessionToken && !isSaved) {
+              void savePractice({
+                sessionToken: auth.sessionToken,
+                kind: "class",
+                title: c.title,
+                style: c.style,
+                difficulty: c.level,
+                contentRef: c.id,
+                href: `/course/${c.id}`,
+              });
+              toast(`${t("practice.loggedPractice")} 🎯`);
+            }
+          }}
+        >
           {isSaved ? "🔖" : "📑"} {isSaved ? t("common.saved") : t("common.save")}
         </button>
       </div>

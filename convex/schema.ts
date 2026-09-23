@@ -342,6 +342,59 @@ const practiceSessions = defineTable({
   .index("by_user_lesson", ["userId", "lessonId"])
   .index("by_user_recent", ["userId", "createdAt"]);
 
+/**
+ * Day 12 — MY PRACTICE. The user's personal practice workspace: saved
+ * Moves / Combos / Choreographies / Classes with their own step lists,
+ * aggregated progress and completion state. Content is stored by reference
+ * (seed catalog key or Convex class/course id) — never duplicated.
+ */
+const practiceItems = defineTable({
+  userId: v.id("users"),
+  /** move | combo | choreography | class */
+  kind: v.string(),
+  title: v.string(),
+  subtitle: v.optional(v.string()),
+  style: v.optional(v.string()),
+  difficulty: v.optional(v.string()),
+  /** Seed catalog course key ("c_begin1") or Convex class/course id. */
+  contentRef: v.string(),
+  /** Deep link back to the content (e.g. /course/:id). */
+  href: v.optional(v.string()),
+  /** Step list — labels plus per-user done state (progress source of truth). */
+  steps: v.array(v.object({ label: v.string(), done: v.optional(v.boolean()) })),
+  /** Set once when every applicable step is done (denormalized for lists). */
+  completedAt: v.optional(v.number()),
+  /** Denormalized practice aggregates (session rows stay the source of truth). */
+  sessionCount: v.optional(v.number()),
+  lastPracticedAt: v.optional(v.number()),
+  totalSeconds: v.optional(v.number()),
+  /** Best attempt video ref (media module reference; moderation-gated). */
+  bestAttemptRef: v.optional(v.string()),
+  createdAt: v.number(),
+})
+  .index("by_user", ["userId"])
+  .index("by_user_recent", ["userId", "lastPracticedAt"]);
+
+/**
+ * Day 12 — one practice session on a practice item. DENSEN only stores
+ * meaningful sessions (>= SESSION_MIN_SECONDS, enforced in the core); the
+ * attempt video is a media-module REFERENCE, moderation-gated like posts.
+ */
+const practiceSessionsLog = defineTable({
+  userId: v.id("users"),
+  itemId: v.id("practiceItems"),
+  seconds: v.number(),
+  /** Attempt video ref (media module) — RECORD MY ATTEMPT. */
+  attemptVideoRef: v.optional(v.string()),
+  /** Side-by-side pair: the reference/teacher video ref for this practice. */
+  teacherVideoRef: v.optional(v.string()),
+  /** Reserved for a future AI analysis engine (undefined today, by design). */
+  analysis: v.optional(v.string()),
+  createdAt: v.number(),
+})
+  .index("by_item", ["itemId", "createdAt"])
+  .index("by_user_recent", ["userId", "createdAt"]);
+
 /** Day 7 — per-(user, lesson) progress + completion state machine.
  *  lessonId is a free catalog key (the client seed catalog is not yet rows
  *  in `lessons`); the field becomes v.id("lessons") with a backfill when
@@ -1019,6 +1072,8 @@ export default defineSchema({
   courses,
   lessons,
   practiceSessions,
+  practiceItems,
+  practiceSessionsLog,
   lessonProgress,
   videos,
   posts,
