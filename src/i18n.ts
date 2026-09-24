@@ -361,6 +361,9 @@ const en = {
   "notif.live.message": "sent you a message.",
   "notif.live.reaction": "reacted to your post.",
   "notif.live.generic": "sent you a notification.",
+  "notif.live.copyright_claim": "filed a copyright claim on your post — review it in Audio → My rights.",
+  "notif.live.copyright_claim_update": "updated your copyright claim — check Audio → My rights.",
+  "notif.live.copyright_dispute_update": "updated your copyright dispute — check Audio → My rights.",
 
   "privacy.live.title": "Privacy Center",
   "privacy.live.sub": "Toggles are previews — every change is re-decided server-side from your date of birth.",
@@ -1844,6 +1847,9 @@ const sq: Record<TKey, string> = {
   "notif.live.message": "ju dërgoi një mesazh.",
   "notif.live.reaction": "reagoi ndaj postimit tuaj.",
   "notif.live.generic": "ju dërgoi një njoftim.",
+  "notif.live.copyright_claim": "dorëzoi një pretendim të drejtash mbi postimin tuaj — shikoje në Audio → Të drejtat e mia.",
+  "notif.live.copyright_claim_update": "përditësoi pretendimin tuaj të drejtash — shikoje në Audio → Të drejtat e mia.",
+  "notif.live.copyright_dispute_update": "përditësoi kundërshtimin tuaj të drejtash — shikoje në Audio → Të drejtat e mia.",
 
   "privacy.live.title": "Qendra e Privatësisë",
   "privacy.live.sub": "Çelësat janë parapamje — çdo ndryshim vendoset nga serveri sipas datëlindjes tuaj.",

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useConvex, useMutation } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Empty, Page } from "../components/ui";
 import { IcCheck, IcMusic } from "../components/icons";
@@ -23,6 +23,54 @@ import {
 type LString = { en: string; sq: string };
 
 const UPLOAD_ACCEPT = "video/mp4,video/quicktime,video/webm";
+
+/* ---------------- Day 13 — music rights UI helpers ---------------- */
+
+/** Server track shape from listComposerMusic (mirrors the wire projection). */
+interface ComposerTrack {
+  id: string;
+  audioId: string;
+  title: string;
+  artist: string;
+  album?: string;
+  rightsHolder: string;
+  licensingStatus: string;
+  territories: string[];
+  permittedUse: string[];
+  commercialUse: boolean;
+  maxDurationSec?: number;
+  licenseExpiresAt?: number;
+  fingerprintRef?: string;
+  restrictions?: string;
+  allowedHere: boolean;
+  denyReason?: string;
+}
+
+/** Bilingual status labels — the REAL record status, never a generic "licensed". */
+const statusLabel = (s: string, lang: "en" | "sq"): string => {
+  const map: Record<string, { en: string; sq: string }> = {
+    densen_licensed: { en: "DENSEN LICENSED", sq: "ME LICENCE DENSEN" },
+    platform_licensed: { en: "PLATFORM LICENSED", sq: "ME LICENCE PLATFORME" },
+    user_owned: { en: "USER OWNED", sq: "I ZOTËSUAR NGA PËRDORUESI" },
+    user_licensed: { en: "USER LICENSED", sq: "ME LICENCE PËRDORUESI" },
+    restricted: { en: "RESTRICTED", sq: "I KUFIZUAR" },
+    copyright_detected: { en: "COPYRIGHT DETECTED", sq: "DEKTUAR AUTORIAL" },
+    removed: { en: "REMOVED", sq: "HEQUR" },
+    disputed: { en: "DISPUTED", sq: "NË KUNDËRSHTIM" },
+  };
+  return tx(map[s] ?? { en: s.toUpperCase(), sq: s.toUpperCase() }, lang);
+};
+
+/** Bilingual deny reasons — mirrors evaluateMusicUse's closed error set. */
+const denyReasonLabel: Record<string, LString> = {
+  no_record: { en: "No permission record exists for this track.", sq: "Nuk ekziston regjistër lejeje për këtë këngë." },
+  status_not_licensable: { en: "This track's rights status does not permit new posts.", sq: "Statusi i të drejtave nuk lejon postime të reja." },
+  use_not_permitted: { en: "This use is not covered by the track's license.", sq: "Ky përdorim nuk mbulohet nga licenca." },
+  territory_not_covered: { en: "Your territory is not covered by the license.", sq: "Territori yt nuk mbulohet nga licenca." },
+  duration_exceeds_license: { en: "The clip is longer than the license permits.", sq: "Klipi është më i gjatë sesa lejon licenca." },
+  license_expired: { en: "The license has expired.", sq: "Licenca ka skaduar." },
+  commercial_use_not_permitted: { en: "Commercial use is not covered.", sq: "Përdorimi komercial nuk mbulohet." },
+};
 
 /** Fallback for any server error code not in the map — never render undefined. */
 const GENERIC_UPLOAD_ERROR: LString = { en: "Publish failed. Please try again.", sq: "Publikimi dështoi. Provo përsëri." };
@@ -85,6 +133,17 @@ export default function Create() {
   const [uploadedVideoId, setUploadedVideoId] = useState<string | null>(null);
   const [fileError, setFileError] = useState<UploadErrorCode | null>(null);
   const live = Boolean(auth.viewer);
+
+  // Day 13 — server-backed music catalog with REAL permission records.
+  // Tracks come from musicRecords (staff-maintained licensing data); each
+  // entry carries its actual status, rights holder, territories, permitted
+  // use, duration cap, expiry and restrictions text. The query re-runs when
+  // the probed clip duration changes, so `allowedHere` reflects the real
+  // duration cap per track (no client-side rights math).
+  const musicCatalog = useQuery(api.musicRightsWire.listComposerMusic, {
+    use: "personal_post" as const,
+    durationSec: durationSec > 0 ? Math.round(durationSec) : undefined,
+  });
 
   const onPickFile = async (f: File | null) => {
     setFileError(null);
@@ -186,6 +245,9 @@ export default function Create() {
           visibility: effVisibility,
           audioLicensed: true,
           videoId: uploadedVideoId,
+          // Day 13 — attach the composer-selected track; the server re-checks
+          // its real permission record before publish (fail-closed).
+          audioRef: audioId,
           // Day 7 lineage — the server re-checks the original creator's
           // reuse permission; these ids are never trusted client-side.
           remixOfPostId: remixOf ?? undefined,
@@ -209,6 +271,9 @@ export default function Create() {
         } else {
           if (res.error === "reuse_not_allowed") {
             toast(t("gov.reuse.offBySafety"));
+          }
+          if (res.error === "music_not_permitted") {
+            toast(lang === "sq" ? "Muzika e zgjedhur nuk lejohet — kontrollo licencën." : "The selected music isn't permitted — check its license.");
           }
           setFileError((res.error as UploadErrorCode) ?? "upload_failed");
           setUploadStage({ stage: "failed", error: (res.error as UploadErrorCode) ?? "upload_failed" });
@@ -424,13 +489,79 @@ export default function Create() {
           <label className="eyebrow" style={{ display: "block", marginBottom: 7 }}>
             <IcMusic size={13} /> {t("create.music")}
           </label>
-          <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-            {audios.map((a) => (
-              <button key={a.id} className={`chip${audioId === a.id ? " active" : ""}`} onClick={() => setAudioId(a.id)}>
-                🎵 {a.name} · {a.dur}
-              </button>
-            ))}
-          </div>
+          {/* Day 13 — DENSEN-approved tracks lead the list. Every track shows
+              its real licensing status; selecting a track reveals the actual
+              rights facts (holder, territories, use, duration cap, expiry,
+              restrictions) — the same record the server re-checks on publish. */}
+          {(() => {
+            const tracks: ComposerTrack[] | undefined = musicCatalog?.ok ? musicCatalog.tracks : undefined;
+            const sel = tracks?.find((x) => x.audioId === audioId);
+            return (
+              <>
+                {tracks === undefined ? (
+                  <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                    {/* catalog still loading — the demo seed registry stays as fallback */}
+                    {audios.map((a) => (
+                      <button key={a.id} className={`chip${audioId === a.id ? " active" : ""}`} onClick={() => setAudioId(a.id)}>
+                        🎵 {a.name} · {a.dur}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                    {tracks.map((trk) => (
+                      <button
+                        key={trk.id}
+                        className={`chip${audioId === trk.audioId ? " active" : ""}`}
+                        style={!trk.allowedHere ? { opacity: 0.55 } : undefined}
+                        onClick={() => setAudioId(trk.audioId)}
+                        title={trk.allowedHere ? statusLabel(trk.licensingStatus, lang) : trk.denyReason && denyReasonLabel[trk.denyReason] ? tx(denyReasonLabel[trk.denyReason], lang) : statusLabel(trk.licensingStatus, lang)}
+                      >
+                        🎵 {trk.title} · {statusLabel(trk.licensingStatus, lang)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {sel && (
+                  <div className="panel" style={{ padding: 12, marginTop: 8, borderColor: sel.allowedHere ? "var(--gold-line)" : "rgba(248,113,113,0.5)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <strong style={{ fontSize: 13 }}>🎵 {sel.title} — {sel.artist}</strong>
+                      <span className={`status ${sel.allowedHere ? "pass" : "action_required"}`} role="status">
+                        <span aria-hidden>{sel.allowedHere ? "✓" : "✕"}</span> {statusLabel(sel.licensingStatus, lang)}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gap: 3, marginTop: 8, fontSize: 12, color: "var(--ink-dim)" }}>
+                      <span>{lang === "sq" ? "Të drejtat" : "Rights holder"}: {sel.rightsHolder}</span>
+                      <span>{lang === "sq" ? "Territore" : "Territories"}: {sel.territories.length ? sel.territories.join(", ") : lang === "sq" ? "Botërore" : "Worldwide"}</span>
+                      <span>
+                        {lang === "sq" ? "Përdorimi i lejuar" : "Permitted use"}: {sel.permittedUse.map((u) => ({ personal_post: lang === "sq" ? "postim personal" : "personal post", commercial_post: lang === "sq" ? "postim komercial" : "commercial post", course_content: lang === "sq" ? "përmbajtje kursesh" : "course content", challenge_content: lang === "sq" ? "sfida" : "challenge content", monetized_post: lang === "sq" ? "postim me monetizim" : "monetized post" }[u] ?? u)).join(", ")}
+                      </span>
+                      <span>
+                        {lang === "sq" ? "Përdorim komercial" : "Commercial use"}: {sel.commercialUse ? (lang === "sq" ? "Po" : "Yes") : lang === "sq" ? "Jo" : "No"}
+                        {sel.maxDurationSec !== undefined && ` · ${lang === "sq" ? "maks" : "max"} ${sel.maxDurationSec}s`}
+                        {sel.licenseExpiresAt !== undefined && ` · ${lang === "sq" ? "skadon" : "expires"} ${new Date(sel.licenseExpiresAt).toLocaleDateString()}`}
+                      </span>
+                    </div>
+                    {sel.restrictions && (
+                      <p className="faint" style={{ fontSize: 11.5, margin: "8px 0 0", lineHeight: 1.6 }}>⚠ {sel.restrictions}</p>
+                    )}
+                    {!sel.allowedHere && (
+                      <p role="alert" style={{ color: "var(--err)", fontSize: 12.5, fontWeight: 700, margin: "8px 0 0" }}>
+                        ✕ {sel.denyReason && denyReasonLabel[sel.denyReason] ? tx(denyReasonLabel[sel.denyReason], lang) : lang === "sq" ? "Kjo këngë nuk lejohet për këtë postim." : "This track is not permitted for this post."}
+                      </p>
+                    )}
+                    {!sel.allowedHere && !sel.fingerprintRef && (
+                      <p className="faint" style={{ fontSize: 11, margin: "6px 0 0" }}>
+                        {lang === "sq"
+                          ? "Nuk ka rregull 'N sekonda është ligjore' — vetëm licenca e regjistruar e këngës lejon përdorimin."
+                          : "There is no safe-second rule — only the track's recorded license permits use."}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* 53: automated safety check — live, with reasons */}

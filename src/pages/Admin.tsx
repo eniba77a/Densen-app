@@ -1,15 +1,21 @@
 import { useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { Page, StatCard } from "../components/ui";
 import { StatusPill, tx } from "../components/gov-ui";
 import { useStore } from "../state/store";
 import { useGov } from "../state/governance";
+import { useAuth } from "../state/auth";
+import { api } from "../../convex/_generated/api";
 import { courses, fmt, users } from "../data/store";
 import {
-  ASSETS,
+  CLAIM_FLOW_LABELS as CLAIM_FLOW_STEPS,
+  DISPUTE_REASON_LABELS,
+  DISPUTE_STATUS_LABELS,
+  MUSIC_STATUS_LABELS,
+} from "../lib/musicRightsClient";
+import {
   CONSENT_LABELS,
   DATA_INVENTORY,
-  licenseExpiring,
-  licenseUnknown,
   money,
   collectMarketedStrings,
   contrastAudit,
@@ -78,6 +84,7 @@ const TABS: [AdminTab, string][] = [
 export default function Admin() {
   const { t, lang, toast } = useStore();
   const gov = useGov();
+  const auth = useAuth();
   const [tab, setTab] = useState<AdminTab>("overview");
   const [reports, setReports] = useState(SEED_REPORTS);
   const [bizDraft, setBizDraft] = useState(gov.business);
@@ -283,34 +290,7 @@ export default function Admin() {
             </>
           )}
 
-          {tab === "copyright" && (
-            <>
-              <div className="panel" style={{ padding: 16, marginBottom: 12 }}>
-                <h2 style={{ fontSize: 15, marginBottom: 10 }}>🎼 {t("gov.admin.assets")}</h2>
-                {ASSETS.map((a) => {
-                  const unknown = licenseUnknown(a);
-                  const expiring = licenseExpiring(a);
-                  return (
-                    <div key={a.name} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                        <strong style={{ fontSize: 13.5 }}>{a.name}</strong>
-                        {unknown ? <StatusPill status="action_required" label={t("gov.admin.unknownLicense")} /> : expiring ? <StatusPill status="warning" label={t("gov.admin.expiring")} /> : <StatusPill status="pass" label={a.license} />}
-                      </div>
-                      <div className="faint" style={{ fontSize: 12, marginTop: 4 }}>
-                        {a.creator} · {unknown ? "—" : <a href={a.licenseUrl} target="_blank" rel="noreferrer" style={{ color: "var(--gold)" }}>{a.licenseUrl}</a>} · commercial: {String(a.commercial)} · modification: {String(a.modification)} · attribution: {String(a.attributionRequired)} · {tx(a.proof, lang)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="panel" style={{ padding: 16 }}>
-                <h2 style={{ fontSize: 15, marginBottom: 10 }}>🎵 Music licensing</h2>
-                <p className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-                  {tx(ASSETS.find((a) => a.kind === "music")!.proof, lang)}
-                </p>
-              </div>
-            </>
-          )}
+          {tab === "copyright" && <CopyrightDashboard sessionToken={auth.sessionToken} />}
 
           {tab === "sdk" && (
             <div className="panel" style={{ padding: "8px 16px" }}>
@@ -530,6 +510,284 @@ export default function Admin() {
       )}
     </Page>
   );
+}
+
+/* ==================== DAY 13: LIVE COPYRIGHT DASHBOARD ==================== */
+
+/** Shape projected by musicRightsWire.adminCopyrightDashboard.flaggedRecords. */
+interface MusicRecordProjection {
+  title: string;
+  artist: string;
+  audioId: string;
+  rightsHolder: string;
+  licensingStatus: string;
+  territories: string[];
+  permittedUse: string[];
+  commercialUse: boolean;
+  maxDurationSec?: number;
+  licenseExpiresAt?: number;
+  fingerprintRef?: string;
+  restrictions?: string;
+}
+
+interface AdminClaim {
+  id: string;
+  audioId: string;
+  postId?: string;
+  affectedUserId?: string;
+  source: string;
+  claimantName: string;
+  assertion: string;
+  status: string;
+  fingerprintRef?: string;
+  createdAt: number;
+}
+interface AdminDispute {
+  id: string;
+  claimId: string;
+  reason: string;
+  statement: string;
+  evidenceRefs: string[];
+  status: string;
+  createdAt: number;
+}
+
+function CopyrightDashboard({ sessionToken }: { sessionToken: string | null }) {
+  const { lang } = useStore();
+  const dash = useQuery(
+    api.musicRightsWire.adminCopyrightDashboard,
+    sessionToken ? ({ sessionToken } as never) : "skip"
+  );
+  const audit = useQuery(
+    api.musicRightsWire.adminRightsAudit,
+    sessionToken ? ({ sessionToken, limit: 20 } as never) : "skip"
+  );
+  const advance = useMutation(api.musicRightsWire.advanceClaim);
+  const review = useMutation(api.musicRightsWire.reviewDispute);
+
+  if (!sessionToken) {
+    return (
+      <div className="panel" style={{ padding: 16 }}>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>🛡 {lang === "sq" ? "Hyr si staf për të parë rreshtat e të drejtave të autorit." : "Sign in as staff to view the live copyright rows."}</p>
+      </div>
+    );
+  }
+
+  const claims: AdminClaim[] = dash?.ok ? dash.claims : [];
+  const disputes: AdminDispute[] = dash?.ok ? dash.disputes : [];
+  const flaggedRecords: (MusicRecordProjection & { id: string })[] = dash?.ok ? dash.flaggedRecords : [];
+  const counts = dash?.ok ? dash.counts : { claims: 0, disputes: 0, flaggedRecords: 0 };
+  const err = dash && !dash.ok ? dash.error : undefined;
+
+  return (
+    <>
+      {err === "forbidden" && (
+        <p className="faint" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+          {lang === "sq" ? "Rreshtat e drejta jetojnë për stafin (moderator+)." : "Rights rows are live for staff (moderator+) accounts."}
+        </p>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
+        <StatCard icon="©️" value={String(counts.claims)} label={lang === "sq" ? "Pretendime aktive" : "Open claims"} accent />
+        <StatCard icon="⚖️" value={String(counts.disputes)} label={lang === "sq" ? "Kundërshtime" : "Disputes"} />
+        <StatCard icon="🚫" value={String(counts.flaggedRecords)} label={lang === "sq" ? "Këngë të shënuara" : "Flagged tracks"} />
+      </div>
+
+      {/* claim queue with the flow actions the brief requires */}
+      <div className="panel" style={{ padding: 16, marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 4 }}>©️ {lang === "sq" ? "Radha e pretendimeve" : "Copyright claim queue"} ({claims.length})</h2>
+        <p className="faint" style={{ fontSize: 12, margin: "0 0 10px", lineHeight: 1.6 }}>
+          {lang === "sq"
+            ? "Rrjedha: marrje → njoftim → kufizim → zëvendëso audio → heq audio → heq përmbajtje. Vendosja nuk bëhet kurrë automatikisht — çdo hap regjistrohet në audit."
+            : "Flow: receive → notify → restrict → replace audio → remove audio → remove content. No automatic legal determinations — every step is audited."}
+        </p>
+        {claims.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {claims.map((cl) => (
+          <div key={cl.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <StatusPill status={cl.status === "resolved" || cl.status === "rejected" ? "pass" : "warning"} label={tx(CLAIM_FLOW_STEPS[cl.status] ?? { en: cl.status, sq: cl.status }, lang)} />
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>🎵 {cl.audioId}</div>
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>
+                  {cl.claimantName} · {cl.source.replace(/_/g, " ")} · {new Date(cl.createdAt).toLocaleString()}
+                  {cl.postId && ` · post ${cl.postId.slice(-6)}`}
+                  {cl.fingerprintRef && ` · fp:${cl.fingerprintRef.slice(0, 12)}`}
+                </div>
+                <div style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.6 }}>{cl.assertion}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {cl.status === "notified" && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "restricted" }))}>
+                  🚧 {lang === "sq" ? "Kufizo" : "Restrict"}
+                </button>
+              )}
+              {cl.status === "restricted" && (
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    const replacement = window.prompt(lang === "sq" ? "audioId zëvendësues (DENSEN-approved):" : "Replacement audioId (DENSEN-approved):", "a2");
+                    if (replacement) void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "audio_replaced", replacementAudioId: replacement }));
+                  }}
+                >
+                  🔁 {lang === "sq" ? "Zëvendëso audio" : "Replace audio"}
+                </button>
+              )}
+              {(cl.status === "restricted" || cl.status === "audio_replaced") && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "audio_removed" }))}>
+                  🔇 {lang === "sq" ? "Heq audio" : "Remove audio"}
+                </button>
+              )}
+              {(cl.status === "restricted" || cl.status === "audio_replaced" || cl.status === "audio_removed") && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "content_removed" }))}>
+                  🗑 {lang === "sq" ? "Heq përmbajtjen" : "Remove content"}
+                </button>
+              )}
+              {cl.status !== "resolved" && cl.status !== "rejected" && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "under_review" }))}>
+                  🔍 {lang === "sq" ? "Shqyrto" : "Review"}
+                </button>
+              )}
+              {cl.status === "under_review" && (
+                <>
+                  <button className="btn btn-sm btn-primary" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "resolved" }))}>
+                    ✓ {lang === "sq" ? "Zgjidh" : "Resolve"}
+                  </button>
+                  <button className="btn btn-sm" onClick={() => void runMutation(() => advance({ sessionToken: sessionToken!, claimId: cl.id, to: "rejected" }))}>
+                    ✕ {lang === "sq" ? "Refuzo" : "Reject"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* disputes with evidence refs + review transitions */}
+      <div className="panel" style={{ padding: 16, marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>⚖️ {lang === "sq" ? "Kundërshtimet" : "Disputes"} ({disputes.length})</h2>
+        {disputes.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {disputes.map((d) => (
+          <div key={d.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <StatusPill status={d.status === "accepted" || d.status === "resolved" ? "pass" : d.status === "rejected" ? "action_required" : "warning"} label={tx(DISPUTE_STATUS_LABELS[d.status] ?? { en: d.status, sq: d.status }, lang)} />
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{tx(DISPUTE_REASON_LABELS[d.reason] ?? { en: d.reason, sq: d.reason }, lang)}</div>
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>{new Date(d.createdAt).toLocaleString()} · {lang === "sq" ? "kund" : "vs claim"} {d.claimId.slice(-6)}</div>
+                <div style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.6 }}>{d.statement}</div>
+                {d.evidenceRefs.length > 0 && (
+                  <div className="faint" style={{ fontSize: 11.5, marginTop: 4 }}>
+                    📎 {lang === "sq" ? "Dëshmi" : "Evidence"}: {d.evidenceRefs.join(", ")}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {d.status === "submitted" && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => review({ sessionToken: sessionToken!, disputeId: d.id, to: "under_review" }))}>
+                  🔍 {lang === "sq" ? "Shqyrto" : "Review"}
+                </button>
+              )}
+              {(d.status === "under_review" || d.status === "submitted") && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => review({ sessionToken: sessionToken!, disputeId: d.id, to: "more_information" }))}>
+                  ℹ️ {lang === "sq" ? "Kërko informacion" : "More info"}
+                </button>
+              )}
+              {(d.status === "under_review" || d.status === "more_information") && (
+                <>
+                  <button className="btn btn-sm btn-primary" onClick={() => void runMutation(() => review({ sessionToken: sessionToken!, disputeId: d.id, to: "accepted" }))}>
+                    ✓ {lang === "sq" ? "Prano" : "Accept"}
+                  </button>
+                  <button className="btn btn-sm" onClick={() => void runMutation(() => review({ sessionToken: sessionToken!, disputeId: d.id, to: "rejected" }))}>
+                    ✕ {lang === "sq" ? "Refuzo" : "Reject"}
+                  </button>
+                </>
+              )}
+              {(d.status === "accepted" || d.status === "rejected") && (
+                <button className="btn btn-sm" onClick={() => void runMutation(() => review({ sessionToken: sessionToken!, disputeId: d.id, to: "resolved" }))}>
+                  🏁 {lang === "sq" ? "Mbyll" : "Close"}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* full music-records registry — the staff-maintained licensing source of truth */}
+      <div className="panel" style={{ padding: 16, marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>🎼 {lang === "sq" ? "Regjistri i muzikës" : "Music records registry"} ({(dash?.ok ? dash.records.length : 0)})</h2>
+        <p className="faint" style={{ fontSize: 12, margin: "0 0 10px", lineHeight: 1.6 }}>
+          {lang === "sq"
+            ? "Burimi i vërtetë i licencave. Përdor përditësimin për të korrigjuar statusin, territoret, përdorimin e lejuar ose kufijtë e kohës — çdo ndryshim regjistrohet në audit."
+            : "The licensing source of truth. Use edit to correct status, territories, permitted use or duration caps — every change is audited."}
+        </p>
+        {(dash?.ok ? dash.records : []).length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {(dash?.ok ? dash.records : []).map((r) => (
+          <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <strong>🎵 {r.title} — {r.artist}</strong>
+              <StatusPill
+                status={r.licensingStatus === "densen_licensed" || r.licensingStatus === "platform_licensed" ? "pass" : r.licensingStatus === "user_owned" || r.licensingStatus === "user_licensed" ? "neutral" : "action_required"}
+                label={statusLabelAdmin(r.licensingStatus, lang)}
+              />
+              <span className="chip" style={{ fontSize: 10.5 }}>{r.audioId}</span>
+            </div>
+            <div className="faint" style={{ fontSize: 11.5, marginTop: 3 }}>
+              {lang === "sq" ? "Të drejtat" : "Rights"}: {r.rightsHolder} · {lang === "sq" ? "Territore" : "Territories"}: {r.territories.length ? r.territories.join(", ") : (lang === "sq" ? "Botërore" : "Worldwide")} · {lang === "sq" ? "Përdorimi" : "Use"}: {r.permittedUse.join(", ") || "—"}
+              {r.maxDurationSec !== undefined && ` · ${lang === "sq" ? "maks" : "max"} ${r.maxDurationSec}s`}
+              {r.licenseExpiresAt !== undefined && ` · ${lang === "sq" ? "skadon" : "expires"} ${new Date(r.licenseExpiresAt).toLocaleDateString()}`}
+            </div>
+            {r.restrictions && <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>⚠ {r.restrictions}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* flagged music records with their real licensing facts */}
+      <div className="panel" style={{ padding: 16, marginBottom: 12 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>🚫 {lang === "sq" ? "Këngë të shënuara" : "Flagged music records"} ({flaggedRecords.length})</h2>
+        {flaggedRecords.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {flaggedRecords.map((r) => (
+          <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <strong>🎵 {r.title} — {r.artist}</strong>
+              <StatusPill status="action_required" label={statusLabelAdmin(r.licensingStatus, lang)} />
+            </div>
+            <div className="faint" style={{ fontSize: 11.5, marginTop: 3 }}>
+              {lang === "sq" ? "Të drejtat" : "Rights"}: {r.rightsHolder} · {lang === "sq" ? "Territore" : "Territories"}: {r.territories.length ? r.territories.join(", ") : "—"}
+              {r.maxDurationSec !== undefined && ` · ${lang === "sq" ? "maks" : "max"} ${r.maxDurationSec}s`}
+              {r.licenseExpiresAt !== undefined && ` · ${lang === "sq" ? "skadon" : "expires"} ${new Date(r.licenseExpiresAt).toLocaleDateString()}`}
+              {r.fingerprintRef && ` · fp:${r.fingerprintRef.slice(0, 12)}`}
+            </div>
+            {r.restrictions && <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>⚠ {r.restrictions}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* append-only audit trail for every rights action */}
+      <div className="panel" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>🧾 {lang === "sq" ? "Audit i të drejtave" : "Rights audit trail"}</h2>
+        {(!audit || !audit.ok || audit.entries.length === 0) && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {audit?.ok &&
+          audit.entries.map((e) => (
+            <div key={e.id} style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5, flexWrap: "wrap" }}>
+              <span className="chip" style={{ fontSize: 10.5 }}>{e.eventType}</span>
+              <span style={{ flex: 1, minWidth: 160 }}>{e.summary}</span>
+              <span className="faint" style={{ fontSize: 11.5 }}>{new Date(e.createdAt).toLocaleString()}</span>
+            </div>
+          ))}
+      </div>
+    </>
+  );
+}
+
+function statusLabelAdmin(s: string, lang: "en" | "sq"): string {
+  return tx(MUSIC_STATUS_LABELS[s] ?? { en: s.toUpperCase(), sq: s.toUpperCase() }, lang);
+}
+
+/** Tiny wrapper so the dashboard stays readable: run a mutation, swallow rejections (toasts surface errors). */
+function runMutation(fn: () => Promise<unknown>): void {
+  void fn().catch(() => {
+    // Errors are surfaced by Convex toasts already; keep the dashboard alive.
+  });
 }
 
 /* ==================== 64: CHILD SAFETY & TRUST DASHBOARD ==================== */

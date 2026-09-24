@@ -404,6 +404,9 @@ export function LiveNotifications() {
     follow: t("notif.live.follow"),
     message: t("notif.live.message"),
     reaction: t("notif.live.reaction"),
+    copyright_claim: t("notif.live.copyright_claim"),
+    copyright_claim_update: t("notif.live.copyright_claim_update"),
+    copyright_dispute_update: t("notif.live.copyright_dispute_update"),
   };
 
   return (
