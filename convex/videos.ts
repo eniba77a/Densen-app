@@ -51,8 +51,12 @@ async function requireCaller(db: { get: any; query: (t: string) => any }, sessio
 }
 
 async function storageMeta(db: any, storageId: string): Promise<{ contentType?: string; size?: number } | null> {
-  const meta = await db.system.query("_storage").withIndex("by_id", (q: any) => q.eq("id", storageId)).unique();
-  return meta ?? null;
+  // db.system.get(fileId) returns the _storage row (contentType, sha256, size)
+  // WITHOUT downloading the blob — the documented metadata API. An earlier
+  // version used db.system.query("_storage").withIndex("by_id", …) which is
+  // not a valid index range on this Convex backend (id is not an indexable
+  // field) and made every real upload fail at completion.
+  return (await db.system.get(storageId)) ?? null;
 }
 
 /* --------------------------- upload session --------------------------- */
