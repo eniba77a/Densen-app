@@ -25,6 +25,7 @@ import {
   canMessageCore,
   evaluateContactPatternCore,
 } from "./safetyCore";
+import { evaluateMusicUse } from "./musicRights";
 import type { Caller, Role } from "./security";
 
 /* ================================================================== */
@@ -379,6 +380,10 @@ export const createPost = mutationGeneric({
      *  Reuse permission is re-checked SERVER-side — the client gate is UX only. */
     remixOfPostId: v.optional(v.string()),
     duetOfPostId: v.optional(v.string()),
+    /** Day 13 — the composer-selected track's audioId (musicRecords). When
+     *  present, the server re-evaluates the track's REAL permission record
+     *  before publish (fail-closed; no client-side rights math is trusted). */
+    audioRef: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
@@ -402,6 +407,51 @@ export const createPost = mutationGeneric({
       scan,
     });
     if (decision.action === "deny") return { ok: false as const, error: decision.error, ruleIds: scan.ruleIds };
+
+    // Day 13 — server-side music-rights check. When a track is attached the
+    // post can only publish if the track's REAL record permits this use.
+    // Fail-closed: unknown audioId or non-permitting status blocks publish.
+    // NO safe-second rule — duration is checked against the track's own
+    // license cap only.
+    let audioRef: string | undefined = undefined;
+    if (args.audioRef) {
+      const recRow = (await ctx.db
+        .query("musicRecords")
+        .withIndex("by_audio", (q: any) => q.eq("audioId", args.audioRef))
+        .unique()) as {
+        licensingStatus: string;
+        territories?: string[];
+        permittedUse?: string[];
+        commercialUse?: boolean;
+        maxDurationSec?: number;
+        licenseExpiresAt?: number;
+        restrictions?: string;
+        title?: string;
+      } | null;
+      const verdict = evaluateMusicUse({
+        record: recRow
+          ? {
+              title: recRow.title ?? "",
+              artist: "",
+              audioId: args.audioRef,
+              rightsHolder: "",
+              licensingStatus: recRow.licensingStatus as never,
+              territories: recRow.territories ?? [],
+              permittedUse: (recRow.permittedUse ?? []) as never,
+              commercialUse: recRow.commercialUse ?? false,
+              maxDurationSec: recRow.maxDurationSec,
+              licenseExpiresAt: recRow.licenseExpiresAt,
+              restrictions: recRow.restrictions,
+            }
+          : null,
+        use: "personal_post",
+        territory: "AL",
+        durationSec: 0,
+        now,
+      });
+      if (verdict.action === "deny") return { ok: false as const, error: "music_not_permitted", musicReason: verdict.error };
+      audioRef = args.audioRef;
+    }
 
     // Ownership check for the attached video: only the caller's own READY
     // video can be published (no cross-user attachment, no pending uploads).
@@ -459,6 +509,7 @@ export const createPost = mutationGeneric({
       style: args.style,
       visibility: effectiveVisibility,
       status: decision.status,
+      audioRef: audioRef as never,
       likeCount: 0,
       commentCount: 0,
       shareCount: 0,

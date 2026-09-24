@@ -57,9 +57,13 @@ function Shell() {
   // Day 11 — one idempotent platform bootstrap per load: seeds the
   // achievements catalog and the platform challenge rows (queries cannot
   // write in Convex, so seeding is a mutation the shell fires).
+  // Day 13 — also seeds the DENSEN-approved music-records starter catalog
+  // (idempotent; staff edits always win over the seed).
   const bootstrapPlatform = useMutation(api.challengesWire.bootstrapPlatform);
+  const bootstrapMusicRights = useMutation(api.musicRightsWire.bootstrapMusicRights);
   useEffect(() => {
     void bootstrapPlatform({});
+    void bootstrapMusicRights({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

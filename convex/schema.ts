@@ -557,6 +557,152 @@ const savedContent = defineTable({
   .index("by_user_type", ["userId", "targetType"])
   .index("by_user_target", ["userId", "targetType", "targetId"]);
 
+/**
+ * Day 13 — MUSIC RIGHTS. One row per track DENSEN can offer in the composer.
+ * The row carries the REAL licensing/permission facts the upload flow displays:
+ * rights holder, status, territories, permitted use, commercial use, maximum
+ * permitted duration, license expiration, fingerprint ref and restrictions.
+ * There is NO safe-second rule anywhere in this model: what a track permits is
+ * only ever what this row (its license/permission record) says it permits.
+ *
+ * Statuses (closed union):
+ *   densen_licensed   — DENSEN negotiated directly with the rights holder
+ *   platform_licensed — covered by a platform/publisher catalog agreement
+ *   user_owned        — the uploading user owns this recording outright
+ *   user_licensed     — the user attached their own license/permission
+ *   restricted        — usable only within the row's explicit restrictions
+ *   copyright_detected — fingerprint/provider match; NOT publishable
+ *   removed           — withdrawn (claim upheld / license lapsed)
+ *   disputed          — a claim against it is being disputed
+ */
+const musicRecords = defineTable({
+  title: v.string(),
+  artist: v.string(),
+  album: v.optional(v.string()),
+  /** Composer/audio key — the id the composer's audio picker selects. */
+  audioId: v.string(),
+  /** The rights holder of record (label, publisher, PRO or the artist). */
+  rightsHolder: v.string(),
+  licensingStatus: v.union(
+    v.literal("densen_licensed"),
+    v.literal("platform_licensed"),
+    v.literal("user_owned"),
+    v.literal("user_licensed"),
+    v.literal("restricted"),
+    v.literal("copyright_detected"),
+    v.literal("removed"),
+    v.literal("disputed")
+  ),
+  /** ISO-3166 alpha-2 codes the license actually covers; empty = worldwide. */
+  territories: v.array(v.string()),
+  /** What the permission record allows, in DENSEN's closed vocabulary. */
+  permittedUse: v.array(
+    v.union(
+      v.literal("personal_post"),
+      v.literal("commercial_post"),
+      v.literal("course_content"),
+      v.literal("challenge_content"),
+      v.literal("monetized_post")
+    )
+  ),
+  /** True only when the permission record explicitly grants commercial use. */
+  commercialUse: v.boolean(),
+  /** Max permitted duration in seconds when the license caps it; undefined = uncapped per the record. */
+  maxDurationSec: v.optional(v.number()),
+  /** Epoch-millis when the license/permission ends; undefined = no expiry on record. */
+  licenseExpiresAt: v.optional(v.number()),
+  /** Fingerprint/reference ID from the identification provider (opaque ref). */
+  fingerprintRef: v.optional(v.string()),
+  /** Human-readable restrictions from the actual license — shown verbatim in the upload flow. */
+  restrictions: v.optional(v.string()),
+  /** Staff-set only (admin wire). System/admin provenance for user rows. */
+  addedByUserId: v.optional(v.id("users")),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_audio", ["audioId"]) // composer picker + server-side publish check
+  .index("by_status", ["licensingStatus", "updatedAt"]) // admin dashboards
+  .index("by_status_audio", ["licensingStatus", "audioId"]); // live-status lookup
+
+/**
+ * Day 13 — COPYRIGHT CLAIMS. A claim arrives from a rights holder (or their
+ * representative via the fingerprinting provider) or from an in-platform
+ * reporter. A claim is a REQUEST for review, not a legal determination:
+ * only staff decide outcomes, and every transition is audited.
+ */
+const musicClaims = defineTable({
+  /** The audio content the claim is against (musicRecords.audioId). */
+  audioId: v.string(),
+  musicRecordId: v.optional(v.id("musicRecords")),
+  /** The affected post, when the claim arrived via published content. */
+  postId: v.optional(v.id("posts")),
+  /** The user who published the affected content (gets the notification). */
+  affectedUserId: v.optional(v.id("users")),
+  /** rights_holder_report | fingerprint_match | user_report. */
+  source: v.union(v.literal("rights_holder_report"), v.literal("fingerprint_match"), v.literal("user_report")),
+  claimantUserId: v.optional(v.id("users")),
+  claimantName: v.string(),
+  assertion: v.string(),
+  /** Reference into the fingerprinting provider's match report, when present. */
+  fingerprintRef: v.optional(v.string()),
+  status: v.union(
+    v.literal("submitted"),
+    v.literal("notified"),
+    v.literal("restricted"),
+    v.literal("audio_replaced"),
+    v.literal("audio_removed"),
+    v.literal("content_removed"),
+    v.literal("under_review"),
+    v.literal("resolved"),
+    v.literal("rejected")
+  ),
+  reviewedBy: v.optional(v.id("users")),
+  resolvedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_audio", ["audioId"])
+  .index("by_status", ["status", "createdAt"]) // admin claim queue
+  .index("by_affected_user", ["affectedUserId", "createdAt"]); // user's claim notices
+
+/**
+ * Day 13 — DISPUTES. The uploader's counter-notice. Evidence is stored by
+ * media-module REFERENCE (never inline); the dispute NEVER changes content
+ * state by itself — only staff review does, with an audit row.
+ */
+const musicDisputes = defineTable({
+  claimId: v.id("musicClaims"),
+  /** Disputant is server-resolved (must be the affected user of the claim). */
+  disputantUserId: v.id("users"),
+  /** i_own | i_have_license | original_audio | incorrect_claim | other. */
+  reason: v.union(
+    v.literal("i_own"),
+    v.literal("i_have_license"),
+    v.literal("original_audio"),
+    v.literal("incorrect_claim"),
+    v.literal("other")
+  ),
+  statement: v.string(),
+  /** Media-module refs for uploaded evidence (licenses, ownership docs). */
+  evidenceRefs: v.array(v.string()),
+  status: v.union(
+    v.literal("submitted"),
+    v.literal("under_review"),
+    v.literal("more_information"),
+    v.literal("accepted"),
+    v.literal("rejected"),
+    v.literal("resolved")
+  ),
+  reviewedBy: v.optional(v.id("users")),
+  reviewNote: v.optional(v.string()),
+  resolvedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_claim", ["claimId"]) // uniqueness-by-convention: one dispute per claim
+  .index("by_status", ["status", "createdAt"])
+  .index("by_disputant", ["disputantUserId", "createdAt"]);
+
 const copyrightClaims = defineTable({
   claimantUserId: v.id("users"),
   targetType: v.union(v.literal("post"), v.literal("course"), v.literal("audio")),
@@ -1081,6 +1227,9 @@ export default defineSchema({
   reactions,
   follows,
   savedContent,
+  musicRecords,
+  musicClaims,
+  musicDisputes,
   copyrightClaims,
   copyrightDisputes,
   moderationActions,
