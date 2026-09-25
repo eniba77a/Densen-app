@@ -7,6 +7,7 @@ import { useGov } from "../state/governance";
 import { useAuth } from "../state/auth";
 import { api } from "../../convex/_generated/api";
 import { courses, fmt, users } from "../data/store";
+import { MOD_CATEGORY_LABELS, MOD_STATUS_LABELS, MOD_TARGET_LABELS } from "../data/moderation";
 import {
   CLAIM_FLOW_LABELS as CLAIM_FLOW_STEPS,
   DISPUTE_REASON_LABELS,
@@ -86,12 +87,10 @@ export default function Admin() {
   const gov = useGov();
   const auth = useAuth();
   const [tab, setTab] = useState<AdminTab>("overview");
-  const [reports, setReports] = useState(SEED_REPORTS);
+  const [reports] = useState(SEED_REPORTS);
   const [bizDraft, setBizDraft] = useState(gov.business);
   const [unlocked, setUnlocked] = useState(false);
   const setRole = (r: StaffRole) => gov.setStaffRole(r);
-
-  const resolve = (id: string) => setReports((rs) => rs.filter((r) => r.id !== id));
 
   // Role-based gate: sensitive governance tabs require the Compliance Admin role.
   const sensitive: AdminTab[] = ["legal", "safety", "copyright", "claims", "inventory", "requests"];
@@ -183,35 +182,7 @@ export default function Admin() {
             </>
           )}
 
-          {tab === "moderation" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {[...gov.reports.map((r) => ({ id: r.id, type: r.targetType, target: r.targetId, reason: r.category, time: new Date(r.ts).toLocaleString(), priority: r.category === "child_safety" ? "critical" : "high", live: true as const })),
-                ...reports.map((r) => ({ ...r, live: false as const }))]
-                .sort((a, b) => (a.priority === "critical" ? -1 : b.priority === "critical" ? 1 : a.priority === "high" ? -1 : b.priority === "high" ? 1 : 0))
-                .map((r) => (
-                  <div key={r.id} className="panel" style={{ padding: 14, display: "flex", gap: 13, alignItems: "center", flexWrap: "wrap", borderColor: r.priority === "critical" ? "rgba(248,113,113,0.5)" : undefined }}>
-                    <span style={{ fontSize: 22 }} aria-hidden>{r.priority === "critical" ? "🚨" : "🚩"}</span>
-                    <div style={{ flex: 1, minWidth: 180 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-                        {r.type} · {r.target} {r.live && <span className="status neutral" style={{ marginLeft: 6 }}>user</span>}
-                      </div>
-                      <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{r.reason} · {r.time}</div>
-                    </div>
-                    <StatusPill status={r.priority === "critical" ? "action_required" : "warning"} label={r.priority === "critical" ? t("gov.report.childNote").split(" ").slice(0, 2).join(" ") : r.priority} />
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button className="btn btn-sm btn-primary" onClick={() => (r.live ? gov.resolveReport(r.id) : resolve(r.id))}>✓ {t("admin.resolve")}</button>
-                      <button className="btn btn-sm" onClick={() => (r.live ? gov.resolveReport(r.id) : resolve(r.id))}>{t("admin.dismiss")}</button>
-                    </div>
-                  </div>
-                ))}
-              {reports.length === 0 && gov.reports.length === 0 && (
-                <div className="panel" style={{ padding: 30, textAlign: "center" }}>
-                  <div style={{ fontSize: 34, marginBottom: 8 }}>🛡️</div>
-                  <p className="muted" style={{ margin: 0 }}>{t("gov.admin.noOpenReports")}</p>
-                </div>
-              )}
-            </div>
-          )}
+          {tab === "moderation" && <ModerationDashboard sessionToken={auth.sessionToken} />}
 
           {tab === "safety" && (
             <>
@@ -510,6 +481,265 @@ export default function Admin() {
         </>
       )}
     </Page>
+  );
+}
+
+/* ==================== DAY 15: LIVE MODERATION DASHBOARD ==================== */
+
+interface ModReportRow {
+  id: string;
+  targetType: string;
+  targetId: string;
+  category: string;
+  details: string;
+  priority: string;
+  status: string;
+  queue: string;
+  reporterHandle: string;
+  targetOwnerHandle: string;
+  targetOwnerId?: string;
+  targetOwnerStatus?: string;
+  createdAt: number;
+  reviewNote?: string;
+}
+interface ModAppealRow {
+  id: string;
+  reportId?: string;
+  appellantHandle: string;
+  targetType: string;
+  targetId: string;
+  statement: string;
+  status: string;
+  createdAt: number;
+}
+interface ModAuditRow {
+  id: string;
+  eventType: string;
+  summary: string;
+  actorRole?: string;
+  createdAt: number;
+}
+
+const MOD_ACTION_BUTTONS: { action: string; label: string; primary?: boolean }[] = [
+  { action: "hide", label: "🚧 Restrict content" },
+  { action: "remove", label: "🗑 Remove content" },
+  { action: "restore", label: "♻️ Restore" },
+  { action: "restrict_user", label: "🔒 Restrict account" },
+  { action: "restrict_messaging", label: "✉️ Restrict messaging" },
+  { action: "lift_restrictions", label: "🔓 Lift restrictions" },
+  { action: "suspend_user", label: "⛔ Suspend", primary: true },
+];
+
+/**
+ * Day 15 — the REAL moderation console over the live reports/appeals tables.
+ * Prioritized queue (child-safety/critical first), the full staff-action
+ * vocabulary with an optional moderation note, the appeal review flow, the
+ * decision ledger and the append-only audit trail. The prototype's local
+ * seed rows remain for guests/offline review.
+ */
+function ModerationDashboard({ sessionToken }: { sessionToken: string | null }) {
+  const { t, lang, toast } = useStore();
+  const { viewer } = useAuth();
+  // Day 15 — staff-only queries fail closed server-side (requireRole throws).
+  // Subscribe ONLY when the viewer actually holds a staff role so a signed-in
+  // non-staff dancer visiting /admin gets the graceful empty state below
+  // instead of a thrown FORBIDDEN error.
+  const isStaff = viewer?.role === "moderator" || viewer?.role === "admin";
+  const queue = useQuery(api.moderationWire.moderationQueue, sessionToken && isStaff ? { sessionToken } : "skip");
+  const appealQueueQ = useQuery(api.moderationWire.appealQueue, sessionToken && isStaff ? { sessionToken } : "skip");
+  const auditQ = useQuery(api.moderationWire.moderationAudit, sessionToken && isStaff ? { sessionToken, limit: 30 } : "skip");
+  const ledgerQ = useQuery(api.moderationWire.actionLedger, sessionToken && isStaff ? { sessionToken } : "skip");
+  const act = useMutation(api.moderationWire.takeModerationAction);
+  const reviewAppeal = useMutation(api.moderationWire.reviewAppeal);
+
+  const [noteFor, setNoteFor] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
+
+  const rows: ModReportRow[] = queue && queue.ok ? (queue.queue as ModReportRow[]) : [];
+  const appeals: ModAppealRow[] = appealQueueQ && appealQueueQ.ok ? (appealQueueQ.appeals as ModAppealRow[]) : [];
+  const auditRows: ModAuditRow[] = auditQ && auditQ.ok ? (auditQ.entries as ModAuditRow[]) : [];
+  const ledger = ledgerQ && ledgerQ.ok ? (ledgerQ.actions as { id: string; action: string; targetType: string; targetId: string; reason: string; note?: string; createdAt: number }[]) : [];
+
+  const doAction = async (reportId: string, action: string, withNote: boolean) => {
+    if (!sessionToken) return;
+    try {
+      const res = (await act({
+        sessionToken,
+        reportId,
+        action,
+        note: withNote ? noteText.trim() || undefined : undefined,
+      })) as { ok: boolean; error?: string; effect?: string };
+      if (!res.ok) {
+        toast(`${t("common.error")}: ${res.error ?? ""}`);
+      } else {
+        toast(`✓ ${res.effect ?? action}`);
+      }
+    } catch {
+      toast(t("common.error"));
+    }
+    setNoteFor(null);
+    setNoteText("");
+  };
+
+  const doAppeal = async (appealId: string, to: "under_review" | "upheld" | "overturned" | "resolved") => {
+    if (!sessionToken) return;
+    try {
+      const res = (await reviewAppeal({ sessionToken, appealId, to })) as { ok: boolean; error?: string };
+      if (!res.ok) toast(`${t("common.error")}: ${res.error ?? ""}`);
+      else toast(`✓ ${to}`);
+    } catch {
+      toast(t("common.error"));
+    }
+  };
+
+  const catLabel = (id: string) => tx(MOD_CATEGORY_LABELS[id] ?? { en: id, sq: id }, lang);
+  const targetLabel = (id: string) => tx(MOD_TARGET_LABELS[id] ?? { en: id, sq: id }, lang);
+  const statusLabel = (id: string) => tx(MOD_STATUS_LABELS[id] ?? { en: id, sq: id }, lang);
+  const priorityPill = (p: string) => (
+    <StatusPill status={p === "critical" ? "action_required" : p === "high" ? "warning" : "neutral"} label={p.toUpperCase()} />
+  );
+
+  if (!sessionToken || !isStaff) {
+    return (
+      <div className="panel" style={{ padding: 20 }}>
+        <p className="muted" style={{ fontSize: 13, margin: 0, lineHeight: 1.7 }}>
+          🛡 {lang === "sq"
+            ? "Radha e moderimit tani funksionon mbi të dhënat reale. Hyr si staf (moderator+) për të shqyrtuar raportet, për të marrë veprime dhe për të shqyrtuar ankimet. Radha lokale e prototipit mbetet më poshtë për demo pa llogari."
+            : "The moderation queue now runs on real data. Sign in as staff (moderator+) to review reports, take actions and review appeals. The local prototype queue stays below for the signed-out demo."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* live report queue */}
+      <div className="panel" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 4 }}>🛡 {t("mod.admin.queue")} ({rows.length})</h2>
+        <p className="faint" style={{ fontSize: 12, margin: "0 0 10px", lineHeight: 1.6 }}>
+          {lang === "sq"
+            ? "Radha prioritizohet: siguria e fëmijëve / kritike së pari. Çdo veprim shkruhet në librin e vendimeve dhe në audit. Raportuesi nuk zbulohet kurrë."
+            : "Prioritized: child-safety/critical first. Every action writes to the decision ledger and the audit log. The reporter is never revealed."}
+        </p>
+        {rows.length === 0 && <p className="faint" style={{ fontSize: 13 }}>{t("mod.admin.queueEmpty")}</p>}
+        {rows.map((r) => (
+          <div key={r.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)", borderColor: r.priority === "critical" ? "rgba(248,113,113,0.35)" : undefined }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 20 }} aria-hidden>{r.queue === "child_safety" ? "🚨" : "🚩"}</span>
+              {priorityPill(r.priority)}
+              <StatusPill status="neutral" label={statusLabel(r.status)} />
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>
+                  {targetLabel(r.targetType)} · {r.targetId.slice(-8)} — <span style={{ color: "var(--gold)" }}>{catLabel(r.category)}</span>
+                </div>
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>
+                  {t("mod.admin.reporter")} @{r.reporterHandle} · {t("mod.admin.owner")} @{r.targetOwnerHandle}
+                  {r.targetOwnerStatus && r.targetOwnerStatus !== "active" ? ` · ${r.targetOwnerStatus}` : ""} · {new Date(r.createdAt).toLocaleString()}
+                </div>
+                {r.details && <div style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.55 }}>{r.details}</div>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {MOD_ACTION_BUTTONS.map((b) => (
+                <button
+                  key={b.action}
+                  className={`btn btn-sm${b.primary ? " btn-danger" : ""}`}
+                  onClick={() =>
+                    b.action === "suspend_user" && !window.confirm(`${b.label} — ${r.targetOwnerHandle}?`)
+                      ? undefined
+                      : void doAction(r.id, b.action, false)
+                  }
+                >
+                  {b.label}
+                </button>
+              ))}
+              <button className="btn btn-sm btn-ghost" onClick={() => setNoteFor(noteFor === r.id ? null : r.id)}>
+                📝 {t("mod.noteFromStaff")}
+              </button>
+            </div>
+            {noteFor === r.id && (
+              <div style={{ marginTop: 8 }}>
+                <textarea className="input" rows={2} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder={t("mod.admin.notePlaceholder")} />
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <button className="btn btn-sm btn-primary" disabled={!noteText.trim()} onClick={() => void doAction(r.id, "dismiss", true)}>
+                    ✓ {t("admin.resolve")} ({t("mod.noteFromStaff")})
+                  </button>
+                  <button className="btn btn-sm" onClick={() => void doAction(r.id, "hide", true)}>
+                    🚧 {t("mod.admin.actions")} + {t("mod.noteFromStaff")}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* appeals */}
+      <div className="panel" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 4 }}>⚖️ {t("mod.admin.appeals")} ({appeals.length})</h2>
+        <p className="faint" style={{ fontSize: 12, margin: "0 0 10px", lineHeight: 1.6 }}>
+          {lang === "sq"
+            ? "Overturn anullon efektin real (rikthen përmbajtjen / heq kufizimet). Upheld mban vendimin. Të dyja mbyllin raportin si zgjidhur."
+            : "Overturn reverts the real effect (restores content / lifts restrictions). Upheld keeps the decision. Both close the linked report as resolved."}
+        </p>
+        {appeals.length === 0 && <p className="faint" style={{ fontSize: 13 }}>{t("mod.admin.appealsEmpty")}</p>}
+        {appeals.map((a) => (
+          <div key={a.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <StatusPill status="warning" label={a.status.replace("_", " ").toUpperCase()} />
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>@{a.appellantHandle} — {targetLabel(a.targetType)} · {a.targetId.slice(-8)}</div>
+                <div style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.55 }}>{a.statement}</div>
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 2 }}>{new Date(a.createdAt).toLocaleString()}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              {a.status === "submitted" && (
+                <button className="btn btn-sm" onClick={() => void doAppeal(a.id, "under_review")}>🔍 {lang === "sq" ? "Shqyrto" : "Review"}</button>
+              )}
+              {a.status === "submitted" || a.status === "under_review" ? (
+                <>
+                  <button className="btn btn-sm btn-primary" onClick={() => void doAppeal(a.id, "overturned")}>
+                    ♻️ {lang === "sq" ? "Anullo vendimin" : "Overturn"}
+                  </button>
+                  <button className="btn btn-sm" onClick={() => void doAppeal(a.id, "upheld")}>
+                    ✓ {lang === "sq" ? "Mban vendimin" : "Uphold"}
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* decision ledger */}
+      <div className="panel" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>📓 {t("mod.admin.ledger")} ({ledger.length})</h2>
+        {ledger.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {ledger.map((l) => (
+          <div key={l.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5, flexWrap: "wrap" }}>
+            <span className="chip" style={{ fontSize: 10.5 }}>{l.action}</span>
+            <strong>{targetLabel(l.targetType)}</strong>
+            <span className="faint" style={{ flex: 1, minWidth: 140 }}>{l.note ?? l.reason}</span>
+            <span className="faint" style={{ fontSize: 11.5 }}>{new Date(l.createdAt).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* append-only audit trail */}
+      <div className="panel" style={{ padding: 16 }}>
+        <h2 style={{ fontSize: 15, marginBottom: 10 }}>🧾 {t("mod.admin.audit")}</h2>
+        {auditRows.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
+        {auditRows.map((e) => (
+          <div key={e.id} style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5, flexWrap: "wrap" }}>
+            <span className="chip" style={{ fontSize: 10.5 }}>{e.eventType}</span>
+            <span style={{ flex: 1, minWidth: 160 }}>{e.summary}</span>
+            {e.actorRole && <span className="faint" style={{ fontSize: 11.5 }}>{t("mod.admin.by")} {e.actorRole}</span>}
+            <span className="faint" style={{ fontSize: 11.5 }}>{new Date(e.createdAt).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

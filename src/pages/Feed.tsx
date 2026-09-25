@@ -130,8 +130,21 @@ function TalkCountButton({ postId, fallback, onOpen }: { postId: string; fallbac
 function LiveCommentRow({ c, targetIsMinor, onReacted }: { c: LiveComment; targetIsMinor: boolean; onReacted: () => void }) {
   const { t, lang } = useStore();
   const { toast, isBlocked, toggleBlock } = useGov();
+  const { sessionToken } = useAuth();
+  const serverBlock = useMutation(api.moderationWire.blockUser);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [reporting, setReporting] = useState(false);
   void targetIsMinor; // verdicts are server-side; kept for parity with previews
+
+  // Day 15 — real server block when signed in; local toggle otherwise.
+  const doBlock = () => {
+    toggleBlock(c.author.handle);
+    if (sessionToken && c.author.userId) {
+      void serverBlock({ sessionToken, targetUserId: c.author.userId }).catch(() => undefined);
+    }
+    toast(isBlocked(c.author.handle) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast"));
+    onReacted();
+  };
 
   // Blocked authors' rows collapse (report/block always available).
   if (isBlocked(c.author.handle)) {
@@ -163,18 +176,20 @@ function LiveCommentRow({ c, targetIsMinor, onReacted }: { c: LiveComment; targe
           ✦
         </button>
         <button
-          onClick={() => {
-            toggleBlock(c.author.handle);
-            toast(isBlocked(c.author.handle) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast"));
-            onReacted();
-          }}
-          aria-label={`${t("gov.msg.block")} @${c.author.handle}`}
-          title={t("gov.msg.block")}
-          style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}
+          onClick={() => setReporting(true)}
+          aria-label={`${t("settings.report")} @${c.author.handle}`}
+          title={t("settings.report")}
+          style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 12, padding: 4 }}
         >
+          🚩
+        </button>
+        <button onClick={doBlock} aria-label={`${t("gov.msg.block")} @${c.author.handle}`} title={t("gov.msg.block")} style={{ background: "none", border: "none", color: "var(--ink-faint)", cursor: "pointer", fontSize: 13, padding: 4 }}>
           🚫
         </button>
         {quickOpen && <QuickReactionBar commentId={c.id} onDone={() => setQuickOpen(false)} />}
+        {reporting && (
+          <ReportModal open onClose={() => setReporting(false)} targetType="comment" targetId={c.id} targetLabel={`@${c.author.handle}`} />
+        )}
       </div>
     </div>
   );
@@ -184,7 +199,7 @@ interface LiveComment {
   id: string;
   body: string;
   createdAt: number;
-  author: { handle: string; displayName: string; avatarUrl?: string };
+  author: { handle: string; displayName: string; avatarUrl?: string; userId?: string };
 }
 
 function relTime(ts: number, lang: string): string {
@@ -210,7 +225,12 @@ function CommentSheet({ post, onClose }: { post: Post; onClose: () => void }) {
   // LIVE comment feed for this dance from Convex.
   const data = useQuery(api.content.listComments, { postId: post.id });
   const liveComments: LiveComment[] =
-    data && typeof data === "object" && "ok" in data && data.ok ? (data.comments as LiveComment[]) : [];
+    data && typeof data === "object" && "ok" in data && data.ok
+      ? (data.comments as (LiveComment & { authorUserId?: string })[]).map((c) => ({
+          ...c,
+          author: { ...c.author, userId: c.authorUserId },
+        }))
+      : [];
 
   // Seed comments from the demo data still render (prototype parity), merged
   // under the live thread — real Convex rows are the source of truth.

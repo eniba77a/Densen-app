@@ -30,6 +30,8 @@ import type * as interactionsWire from "../interactionsWire.js";
 import type * as learning from "../learning.js";
 import type * as learningWire from "../learningWire.js";
 import type * as media from "../media.js";
+import type * as moderation from "../moderation.js";
+import type * as moderationWire from "../moderationWire.js";
 import type * as musicRights from "../musicRights.js";
 import type * as musicRightsWire from "../musicRightsWire.js";
 import type * as paymentProvider from "../paymentProvider.js";
@@ -79,6 +81,8 @@ declare const fullApi: ApiFromModules<{
   learning: typeof learning;
   learningWire: typeof learningWire;
   media: typeof media;
+  moderation: typeof moderation;
+  moderationWire: typeof moderationWire;
   musicRights: typeof musicRights;
   musicRightsWire: typeof musicRightsWire;
   paymentProvider: typeof paymentProvider;
