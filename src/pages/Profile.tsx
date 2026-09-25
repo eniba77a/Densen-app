@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { useAuth } from "../state/auth";
 import { Avatar, Bar, Empty, LevelBadge, Page } from "../components/ui";
 import { IcMapPin, IcPlay, IcSettings, IcVerified } from "../components/icons";
 import { ME, useStore } from "../state/store";
@@ -27,7 +28,30 @@ function Stat({ v, label }: { v: string | number; label: string }) {
 function ProfileHeader({ userId }: { userId: string }) {
   const { t, following, toggleFollow, toast, lang } = useStore();
   const { toggleBlock, isBlocked, toggleMute, isMuted } = useGov();
+  const { sessionToken } = useAuth();
+  const serverBlock = useMutation(api.moderationWire.blockUser);
+  const serverUnblock = useMutation(api.moderationWire.unblockUser);
+  const serverMute = useMutation(api.moderationWire.muteUser);
+  const serverUnmute = useMutation(api.moderationWire.unmuteUser);
   const [reporting, setReporting] = useState(false);
+
+  /** Day 15 — block/mute persist server-side when signed in, locally otherwise. */
+  const doBlock = () => {
+    toggleBlock(u.id);
+    if (sessionToken) {
+      const turningOn = !isBlocked(u.id);
+      void (turningOn ? serverBlock({ sessionToken, targetUserId: u.id }) : serverUnblock({ sessionToken, targetUserId: u.id })).catch(() => undefined);
+    }
+    toast(isBlocked(u.id) ? t("gov.unblock") : t("settings.block"));
+  };
+  const doMute = () => {
+    toggleMute(u.id);
+    if (sessionToken) {
+      const turningOn = !isMuted(u.id);
+      void (turningOn ? serverMute({ sessionToken, targetUserId: u.id }) : serverUnmute({ sessionToken, targetUserId: u.id })).catch(() => undefined);
+    }
+    toast(isMuted(u.id) ? t("gov.unmute") : "🔇 " + t("settings.mute"));
+  };
   const nav = useNavigate();
   const isMe = userId === "me";
   const u = isMe ? ME : userById(userId);
@@ -122,10 +146,10 @@ function ProfileHeader({ userId }: { userId: string }) {
               >
                 🚩 {t("settings.report")}
               </button>
-              <button className="btn btn-sm btn-ghost" onClick={() => { toggleMute(u.id); toast(isMuted(u.id) ? t("gov.unmute") : "🔇 " + t("settings.mute")); }}>
+              <button className="btn btn-sm btn-ghost" onClick={doMute}>
                 {isMuted(u.id) ? "🔔" : "🔇"} {isMuted(u.id) ? t("gov.unmute") : t("settings.mute")}
               </button>
-              <button className="btn btn-sm btn-danger" onClick={() => { toggleBlock(u.id); toast(isBlocked(u.id) ? t("gov.unblock") : t("settings.block")); }}>
+              <button className="btn btn-sm btn-danger" onClick={doBlock}>
                 🚫 {isBlocked(u.id) ? t("gov.unblock") : t("settings.block")}
               </button>
             </>

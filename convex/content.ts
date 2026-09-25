@@ -322,7 +322,10 @@ export const listComments = queryGeneric({
         id: r._id as string,
         body: r.body,
         createdAt: r.createdAt,
+        // Day 15: userId enables Report/Block wiring on comment rows (the
+        // author id is already public content metadata — no PII added).
         author: authors.get(r.userId) ?? { handle: "dancer", displayName: "Dancer", avatarUrl: undefined },
+        authorUserId: r.userId as string,
       })),
     };
   },

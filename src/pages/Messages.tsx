@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { Avatar, Empty, Page } from "../components/ui";
 import { IcSend, IcVerified } from "../components/icons";
 import { useStore } from "../state/store";
@@ -9,6 +11,7 @@ import { IMG } from "../data/media";
 import { useGov } from "../state/governance";
 import { ReportModal, tx } from "../components/gov-ui";
 import { canMessage } from "../data/safety";
+import { useAuth } from "../state/auth";
 
 /* ---------------- conversation list ---------------- */
 export function MessagesPage() {
@@ -94,7 +97,30 @@ export function ChatPage() {
   const nav = useNavigate();
   const { t, sentMessages, sendMessage } = useStore();
   const gov = useGov();
+  const { sessionToken } = useAuth();
+  const serverBlock = useMutation(api.moderationWire.blockUser);
+  const serverUnblock = useMutation(api.moderationWire.unblockUser);
+  const serverMute = useMutation(api.moderationWire.muteUser);
+  const serverUnmute = useMutation(api.moderationWire.unmuteUser);
   const [reportOpen, setReportOpen] = useState(false);
+
+  /** Day 15 — block/mute persist server-side when signed in, locally otherwise. */
+  const doBlock = () => {
+    gov.toggleBlock(other.id);
+    if (sessionToken) {
+      const turningOn = !gov.isBlocked(other.id);
+      void (turningOn ? serverBlock({ sessionToken, targetUserId: other.id }) : serverUnblock({ sessionToken, targetUserId: other.id })).catch(() => undefined);
+    }
+    gov.toast(gov.isBlocked(other.id) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast"));
+  };
+  const doMute = () => {
+    gov.toggleMute(other.id);
+    if (sessionToken) {
+      const turningOn = !gov.isMuted(other.id);
+      void (turningOn ? serverMute({ sessionToken, targetUserId: other.id }) : serverUnmute({ sessionToken, targetUserId: other.id })).catch(() => undefined);
+    }
+    gov.toast(gov.isMuted(other.id) ? t("gov.msg.unmuted") : t("gov.msg.muted"));
+  };
   const cv = conversations.find((c) => c.id === convId);
   const [text, setText] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
@@ -246,20 +272,10 @@ export function ChatPage() {
       {/* composer — locked when the safety gate says no */}
       <div style={{ padding: "10px 16px calc(12px + var(--sab))", borderTop: "1px solid var(--line)", background: "var(--bg-soft)", display: "flex", gap: 10, maxWidth: 892, width: "100%", margin: "0 auto" }}>
         <button className="btn btn-icon btn-ghost" onClick={() => setReportOpen(true)} aria-label={t("settings.report")} title={t("settings.report")}>🚩</button>
-        <button
-          className="btn btn-icon btn-ghost"
-          onClick={() => { gov.toggleBlock(other.id); gov.toast(gov.isBlocked(other.id) ? t("gov.msg.unblocked") : t("gov.msg.blockedToast")); }}
-          aria-label={t("gov.msg.block")}
-          title={t("gov.msg.block")}
-        >
+        <button className="btn btn-icon btn-ghost" onClick={doBlock} aria-label={t("gov.msg.block")} title={t("gov.msg.block")}>
           🚫
         </button>
-        <button
-          className="btn btn-icon btn-ghost"
-          onClick={() => { gov.toggleMute(other.id); gov.toast(gov.isMuted(other.id) ? t("gov.msg.unmuted") : t("gov.msg.muted")); }}
-          aria-label={t("gov.msg.mute")}
-          title={t("gov.msg.mute")}
-        >
+        <button className="btn btn-icon btn-ghost" onClick={doMute} aria-label={t("gov.msg.mute")} title={t("gov.msg.mute")}>
           🔇
         </button>
         <input
@@ -379,9 +395,6 @@ import { notifications as notifications0 } from "../data/store";
    public profile projections only. Falls back to the prototype feed above
    for guests/offline preview — the same page serves both worlds honestly.
    ========================================================================== */
-import { useMutation, useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
-import { useAuth } from "../state/auth";
 
 export function LiveNotifications() {
   const { t } = useStore();

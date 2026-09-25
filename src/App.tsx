@@ -19,6 +19,7 @@ import { ChallengesPage, ChallengeDetail } from "./pages/Challenges";
 import { EventsPage, LivePage, LeaderboardsPage } from "./pages/EventsLive";
 import { MessagesPage, ChatPage, NotificationsRoute } from "./pages/Messages";
 import PrivacyCenterLive from "./pages/PrivacyCenterLive";
+import ModerationCenter from "./pages/ModerationCenter";
 import { useAuth } from "./state/auth";
 import { UserProfilePage, TeamsPage, TeamDetailPage } from "./pages/Profile";
 import Create, { Duet, Remix } from "./pages/Create";
@@ -115,6 +116,7 @@ function Shell() {
         <Route path="/audio" element={<Audio />} />
         <Route path="/legal/:docId" element={<LegalPage />} />
         <Route path="/privacy" element={<PrivacyRoute />} />
+        <Route path="/moderation" element={<ModerationCenter />} />
         <Route path="/safety" element={<SafetyCenter />} />
         <Route path="/business" element={<BusinessPage />} />
         <Route path="/unsubscribe" element={<UnsubscribePage />} />

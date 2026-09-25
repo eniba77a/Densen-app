@@ -180,6 +180,7 @@ function Sidebar() {
         <SideLink key={to} to={to} icon={<Icon size={21} />} label={t(key)} />
       ))}
       <div style={{ flex: 1 }} />
+      <SideLink to="/moderation" icon={<IcShield size={21} />} label={t("mod.title")} />
       <SideLink to="/admin" icon={<IcShield size={21} />} label={t("nav.admin")} />
       <SideLink to="/settings" icon={<IcSettings size={21} />} label={t("nav.settings")} />
       <button

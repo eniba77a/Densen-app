@@ -749,12 +749,18 @@ const moderationActions = defineTable({
   action: v.union(
     v.literal("hide"),
     v.literal("remove"),
-    v.literal("restrict_user"),
+    v.literal("restore"), // Day 15: undo a hide/remove (restore content)
+    v.literal("restrict_user"), // Day 15: visibility/messaging limits (users.status=restricted)
+    v.literal("lift_restrictions"), // Day 15: undo restrict_user
     v.literal("ban_user"),
+    v.literal("suspend_user"), // Day 15: temporary full lockout (users.status=suspended)
+    v.literal("restrict_messaging"), // Day 15: messagesFrom clamp to "none"
     v.literal("dismiss")
   ),
   reason: v.string(),
   reportId: v.optional(v.id("reports")), // linkage to the originating report
+  /** Day 15 (additive, optional): staff moderation note shown to the user-facing decision. */
+  note: v.optional(v.string()),
   createdAt: v.number(),
 })
   .index("by_target", ["targetType", "targetId"])
@@ -1127,18 +1133,79 @@ const reports = defineTable({
   details: v.string(),
   priority: v.union(v.literal("critical"), v.literal("high"), v.literal("normal")),
   status: v.union(
-    v.literal("open"),
-    v.literal("reviewing"),
-    v.literal("resolved"),
-    v.literal("dismissed")
+    v.literal("open"), // legacy rows (pre-Day 15); kept so old data still validates
+    v.literal("reviewing"), // legacy rows
+    v.literal("pending"), // Day 15 state machine: awaiting first review
+    v.literal("under_review"), // Day 15 state machine: staff has it open
+    v.literal("action_taken"),
+    v.literal("dismissed"),
+    v.literal("appealed"),
+    v.literal("resolved")
   ),
   assignedTo: v.optional(v.id("users")), // moderator — role-checked before reads
+  // Day 15 (additive, optional — zero backfill): staff review trail.
+  reviewedBy: v.optional(v.id("users")),
+  reviewNote: v.optional(v.string()), // moderation notes (what staff did + why)
+  resolvedAt: v.optional(v.number()),
   createdAt: v.number(),
   updatedAt: v.number(),
 })
   .index("by_status_priority", ["status", "priority", "createdAt"]) // moderation queue
+  .index("by_status", ["status", "createdAt"]) // Day 15: appealed/assigned queues
   .index("by_target", ["targetType", "targetId"])
   .index("by_reporter", ["reporterId"]);
+
+/**
+ * Day 15 — MODERATION APPEALS. A restricted/suspended user (or an affected
+ * content owner) contests a moderation decision. The appeal never reverts
+ * anything by itself — only staff review does, with an audit row. One open
+ * appeal per report (uniqueness by convention via by_report).
+ */
+const moderationAppeals = defineTable({
+  reportId: v.optional(v.id("reports")), // the decision being contested (when it came from a report)
+  /** The user contesting — server-resolved from the session, never from args. */
+  appellantUserId: v.id("users"),
+  /** Who was affected: the appellant themselves, or the content owner they act for (self only in v1). */
+  affectedUserId: v.optional(v.id("users")),
+  targetType: v.union(
+    v.literal("post"),
+    v.literal("comment"),
+    v.literal("user"),
+    v.literal("message"),
+    v.literal("challenge")
+  ),
+  targetId: v.string(),
+  statement: v.string(),
+  status: v.union(
+    v.literal("submitted"),
+    v.literal("under_review"),
+    v.literal("upheld"), // original decision stands
+    v.literal("overturned"), // decision reverted
+    v.literal("resolved")
+  ),
+  reviewedBy: v.optional(v.id("users")),
+  reviewNote: v.optional(v.string()),
+  resolvedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_status", ["status", "createdAt"]) // staff appeal queue
+  .index("by_appellant", ["appellantUserId", "createdAt"]) // my appeals
+  .index("by_report", ["reportId"]); // one-appeal-per-report lookup
+
+/**
+ * Day 15 — MUTES. Quieter than a block: hides the muted user's content from
+ * the muter's feeds and drops their DM notifications, but leaves both
+ * accounts otherwise untouched. Staff (moderator/admin) stay reachable.
+ */
+const mutes = defineTable({
+  muterId: v.id("users"),
+  mutedId: v.id("users"),
+  reason: v.optional(v.string()),
+  createdAt: v.number(),
+})
+  .index("by_muter", ["muterId", "mutedId"]) // uniqueness + isMuted lookup
+  .index("by_muted", ["mutedId"]); // reverse lookup
 
 const consents = defineTable({
   userId: v.id("users"),
@@ -1265,6 +1332,8 @@ export default defineSchema({
   subscriptions,
   teacherPayouts,
   reports,
+  moderationAppeals,
+  mutes,
   consents,
   privacySettings,
   devicePermissions,

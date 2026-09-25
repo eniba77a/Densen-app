@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { useGov } from "../state/governance";
-import { DOCS, type DocId, type Bi, COOKIE_CATEGORIES, REPORT_CATEGORIES, PERMISSIONS, type PermissionKey, type AuditStatus } from "../data/governance";
+import { DOCS, type DocId, type Bi, COOKIE_CATEGORIES, PERMISSIONS, type PermissionKey, type AuditStatus } from "../data/governance";
+import { MOD_REPORT_CATEGORIES } from "../data/moderation";
+import { useAuth } from "../state/auth";
 import { useStore } from "../state/store";
 import type { Lang } from "../i18n";
 import { IcCheck, IcShield, IcVerified } from "./icons";
@@ -223,7 +227,7 @@ export function CookieBanner() {
     </div>
   );
 }
-function useStoreLang(): Lang {
+export function useStoreLang(): Lang {
   return useStore().lang;
 }
 
@@ -280,7 +284,14 @@ export function CookiePrefsCard() {
   );
 }
 
-/* ---------------- report modal ---------------- */
+/* ---------------- report modal (Day 15: 11 categories, server-backed) ---------------- */
+/**
+ * The single Report entry point for every moderatable surface (profile,
+ * video, comment, message, challenge). Signed-in users submit through the
+ * REAL moderation pipeline (server-resolved priority, child-safety queue,
+ * rate limits, duplicate protection). Guests keep the local prototype row
+ * so the governance demo still works offline.
+ */
 export function ReportModal({
   open,
   onClose,
@@ -296,12 +307,35 @@ export function ReportModal({
 }) {
   const { t } = useStore();
   const { submitReport, toast } = useGov();
-  const [category, setCategory] = useState<null | (typeof REPORT_CATEGORIES)[number]["id"]>(null);
+  const { sessionToken } = useAuth();
+  const lang = useStoreLang();
+  const submitServer = useMutation(api.moderationWire.submitReport);
+  const [category, setCategory] = useState<string | null>(null);
   const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const submit = () => {
-    if (!category) return;
-    submitReport(targetType, targetId, category, details.trim());
+  const submit = async () => {
+    if (!category || busy) return;
+    setBusy(true);
+    setError(null);
+    if (sessionToken) {
+      try {
+        const res = await submitServer({ sessionToken, targetType, targetId, category, details: details.trim() });
+        if (!res?.ok) {
+          setBusy(false);
+          setError(res?.error ?? "error");
+          return;
+        }
+      } catch {
+        setBusy(false);
+        setError("network");
+        return;
+      }
+    } else {
+      submitReport(targetType, targetId, category as never, details.trim());
+    }
+    setBusy(false);
     toast(t("gov.report.sent"));
     setCategory(null);
     setDetails("");
@@ -312,7 +346,7 @@ export function ReportModal({
     <Modal open={open} onClose={onClose} title={`${t("gov.report.title")}${targetLabel ? ` — ${targetLabel}` : ""}`}>
       <p style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 8 }}>{t("gov.report.choose")}</p>
       <div role="radiogroup" aria-label={t("gov.report.choose")} style={{ display: "grid", gap: 8 }}>
-        {REPORT_CATEGORIES.map((c) => (
+        {MOD_REPORT_CATEGORIES.map((c) => (
           <button
             key={c.id}
             role="radio"
@@ -330,7 +364,7 @@ export function ReportModal({
             }}
           >
             {c.escalate && <IcShield size={14} style={{ verticalAlign: "-2px", marginRight: 6, color: "var(--gold)" }} />}
-            {tx(c.label, useStoreLang())}
+            {lang === "sq" ? c.sq : c.en}
           </button>
         ))}
       </div>
@@ -342,13 +376,24 @@ export function ReportModal({
       <label className="input-label" htmlFor="rep-details" style={{ marginTop: 12 }}>
         {t("gov.report.details")} <span className="optional-tag">{t("gov.optional")}</span>
       </label>
-      <textarea id="rep-details" className="input" value={details} onChange={(e) => setDetails(e.target.value)} rows={3} />
+      <textarea id="rep-details" className="input" value={details} onChange={(e) => setDetails(e.target.value)} rows={3} maxLength={1200} />
+      {error && (
+        <p role="alert" style={{ marginTop: 8, fontSize: 12.5, fontWeight: 700, color: "var(--gold)" }}>
+          {error === "duplicate_open_report"
+            ? lang === "sq" ? "Ke një raport të hapur për këtë përmbajtje." : "You already have an open report on this content."
+            : error === "rate_limited"
+              ? lang === "sq" ? "Shumë raporte në radhë — provo më vonë." : "Too many reports right now — try again later."
+              : error === "self_report"
+                ? lang === "sq" ? "Nuk mund të raportosh përmbajtjen tënde." : "You can't report your own content."
+                : t("common.error")}
+        </p>
+      )}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
         <button className="btn" style={{ flex: 1 }} onClick={onClose}>
           {t("common.cancel")}
         </button>
-        <button className="btn btn-primary" style={{ flex: 1 }} disabled={!category} onClick={submit}>
-          {t("gov.report.submit")}
+        <button className="btn btn-primary" style={{ flex: 1 }} disabled={!category || busy} onClick={() => void submit()}>
+          {busy ? "…" : t("gov.report.submit")}
         </button>
       </div>
     </Modal>
