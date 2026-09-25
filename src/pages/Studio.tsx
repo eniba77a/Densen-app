@@ -636,6 +636,10 @@ function Revenue() {
   const { t } = useT();
   const { sessionToken } = useAuth();
   const data = useQuery(api.studioWire.getRevenue, sessionToken ? { sessionToken } : "skip");
+  // Day 14 — the teacher's REAL money view: verified provider transactions
+  // only (charges minus refunds). Accruals below remain the payout truth.
+  const verified = useQuery(api.paymentsWire.getMyRevenue, sessionToken ? { sessionToken } : "skip");
+  const vok = verified && "ok" in verified && verified.ok;
   const [amount, setAmount] = useState("10.00");
   const preview = useQuery(
     api.studioWire.previewSplit,
@@ -645,6 +649,25 @@ function Revenue() {
   const money = (c: number) => `€${(c / 100).toFixed(2)}`;
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {/* Day 14 — verified payments (provider-confirmed transactions only) */}
+      <div className="panel" style={{ padding: 14, display: "grid", gap: 8 }}>
+        <strong style={{ fontFamily: "Sora" }}>💳 {t("studio.payments.title")}</strong>
+        {vok ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+              <StatCard icon="💰" value={money(verified.chargesCents)} label={t("studio.payments.charges")} accent />
+              <StatCard icon="↩️" value={money(verified.refundedCents)} label={t("studio.payments.refunded")} />
+              <StatCard icon="📊" value={money(verified.netCents)} label={t("studio.payments.net")} />
+            </div>
+            <p className="faint" style={{ fontSize: 12, margin: 0 }}>
+              {verified.transactionCount} {t("studio.payments.txs")} · {t("studio.payments.note")}
+            </p>
+          </>
+        ) : (
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("studio.payments.empty")}</p>
+        )}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
         <StatCard icon={ok ? `(${data.sharePct}%)` : "…"} value={ok ? money(data.accruingCents) : "—"} label={t("studio.revenue.accruing")} accent />
         <StatCard icon="🏦" value={ok ? money(data.scheduledCents) : "—"} label={t("studio.revenue.scheduled")} />

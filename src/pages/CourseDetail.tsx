@@ -30,11 +30,26 @@ export default function CourseDetail() {
   const [playing, setPlaying] = useState(false);
   const [checkout, setCheckout] = useState(false);
   const [spending, setSpending] = useState(false);
+  // Day 14 — real checkout state. `provider_not_configured` is the HONEST
+  // outcome until a payment provider is registered; the message says exactly
+  // that and nothing becomes paid.
+  const [buying, setBuying] = useState(false);
+  const [buyMsg, setBuyMsg] = useState<string | null>(null);
 
   // Day 10 — real Dance-Credits unlock: the button below spends from the
   // server-authoritative ledger (never local state). Replay-safe via the
   // ledger's refId probe; balance and history are reactive subscriptions.
   const spendCredits = useMutation(api.creditsWire.spendCredits);
+  // Day 14 — real purchase intent + server-owned entitlement + receipt history.
+  const startPurchase = useMutation(api.paymentsWire.startPurchase);
+  const myPurchases = useQuery(
+    api.paymentsWire.listMyPurchases,
+    auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
+  );
+  const serverPurchaseOwned =
+    myPurchases?.ok === true &&
+    Array.isArray(myPurchases.purchases) &&
+    myPurchases.purchases.some((p: { classId?: string; status?: string }) => p.classId === c?.id && p.status === "paid");
   const myCredits = useQuery(
     api.creditsWire.getMyCredits,
     auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
@@ -75,10 +90,12 @@ export default function CourseDetail() {
   const owned = gov.owns(c.id);
   // Day 10 — server-side unlock state: a recorded credit spend for this
   // class in the ledger means unlocked, regardless of local mirrors.
+  // Day 14 — a verified PAID purchase on the server also means unlocked.
   const serverOwned =
-    myCredits?.ok === true &&
-    Array.isArray(myCredits.history) &&
-    myCredits.history.some((h) => h.refId === `class:${c.id}` && h.amount < 0);
+    (myCredits?.ok === true &&
+      Array.isArray(myCredits.history) &&
+      myCredits.history.some((h) => h.refId === `class:${c.id}` && h.amount < 0)) ||
+    serverPurchaseOwned;
   const unlocked = owned || serverOwned;
   const creditBalance = myCredits?.ok === true ? myCredits.balance : null;
   const reviews = reviewsFor(c.id);
@@ -421,20 +438,66 @@ export default function CourseDetail() {
             <div style={{ marginTop: 6 }}>🏢 {t("gov.businessInfo")}: <button onClick={() => { setCheckout(false); nav("/business"); }} style={{ background: "none", border: "none", color: "var(--gold)", cursor: "pointer", padding: 0, fontSize: 12.5, fontWeight: 700 }}>densen.app/business</button></div>
           </div>
           <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>{t("gov.buy.terms")}</p>
+          {!auth.sessionToken && (
+            <p className="faint" style={{ fontSize: 11.5, marginTop: 6, color: "var(--gold)" }}>ℹ {t("pay.demoNote")}</p>
+          )}
           <p className="faint" style={{ fontSize: 11.5, marginTop: 6, color: "var(--warn)" }}>⚠ {t("gov.buy.demo")}</p>
+          {buyMsg && (
+            <p className="faint" style={{ fontSize: 12, marginTop: 8, color: "var(--warn)" }}>{buyMsg}</p>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
             <button className="btn" style={{ flex: 1 }} onClick={() => setCheckout(false)}>{t("common.cancel")}</button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              onClick={() => {
-                gov.buyCourse(c.id);
-                setCheckout(false);
-                toast(t("gov.buy.done"));
-              }}
-            >
-              {t("gov.buy.confirm")}{access !== "credits" ? ` · ${money(priced.priceCents)}` : ""}
-            </button>
+            {auth.sessionToken ? (
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                disabled={buying}
+                onClick={async () => {
+                  setBuying(true);
+                  setBuyMsg(null);
+                  try {
+                    const r = await startPurchase({
+                      sessionToken: auth.sessionToken!,
+                      classId: c.id,
+                      seedPriceCents: priced.priceCents,
+                      seedCreditPrice: priced.creditPrice,
+                    });
+                    if (r.ok) {
+                      // Real provider session minted — hand off to the provider's
+                      // checkout page. The purchase stays pending until the
+                      // provider's verified event confirms payment.
+                      setCheckout(false);
+                      toast(t("pay.startCheckout"));
+                      window.location.href = r.checkoutUrl;
+                    } else {
+                      // Honest failure mapping — nothing is ever marked paid here.
+                      if (r.error === "provider_not_configured") setBuyMsg(t("pay.err.provider_not_configured"));
+                      else if (r.error === "already_owned") setBuyMsg(t("pay.err.already_owned"));
+                      else if (r.error === "already_pending") setBuyMsg(t("pay.err.already_pending"));
+                      else if (r.error === "unauthenticated") setBuyMsg(t("pay.err.unauthenticated"));
+                      else if (r.error === "free_class" || r.error === "not_purchasable") setBuyMsg(t("common.error"));
+                      else setBuyMsg(t("common.error"));
+                    }
+                  } finally {
+                    setBuying(false);
+                  }
+                }}
+              >
+                {buying ? "…" : `🛒 ${t("pay.startCheckout")}${access !== "credits" ? ` · ${money(priced.priceCents)}` : ""}`}
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  gov.buyCourse(c.id);
+                  setCheckout(false);
+                  toast(t("gov.buy.done"));
+                }}
+              >
+                {t("gov.buy.confirm")}{access !== "credits" ? ` · ${money(priced.priceCents)}` : ""}
+              </button>
+            )}
           </div>
         </Modal>
       )}
