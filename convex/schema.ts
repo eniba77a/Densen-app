@@ -983,7 +983,16 @@ const userMissions = defineTable({
 /* ---------------- commercial module ---------------- */
 const purchases = defineTable({
   userId: v.id("users"),
-  courseId: v.id("courses"),
+  /** Convex course row id — optional (Day 14, additive) because the seed-catalog
+   *  classes are not rows in `courses`; those purchases reference catalog keys
+   *  via `courseKey` instead. Exactly one of the two is set on every new row. */
+  courseId: v.optional(v.id("courses")),
+  /** Seed-catalog class key (e.g. "c_commercial1") when the class is not a
+   *  Convex row yet (Day 14, additive — zero backfill required). */
+  courseKey: v.optional(v.string()),
+  /** Server-resolved teacher of the class (Day 14, additive) — the revenue
+   *  attribution is decided by the server at purchase time, never by the client. */
+  teacherUserId: v.optional(v.id("users")),
   amountCents: v.number(),
   currency: v.string(),
   // Real money state lives in the payment provider; this mirrors provider state.
@@ -1000,7 +1009,9 @@ const purchases = defineTable({
 })
   .index("by_user", ["userId"]) // entitlement checks + purchase history
   .index("by_user_course", ["userId", "courseId"]) // owns(course) lookup
-  .index("by_provider_ref", ["providerRef"]); // webhook idempotency
+  .index("by_user_course_key", ["userId", "courseKey"]) // seed-catalog duplicate-purchase probe
+  .index("by_provider_ref", ["providerRef"]) // webhook idempotency
+  .index("by_teacher_user", ["teacherUserId", "createdAt"]); // teacher revenue attribution
 
 const subscriptions = defineTable({
   userId: v.id("users"),
