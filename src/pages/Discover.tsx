@@ -1,92 +1,214 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Avatar, LevelBadge, Page } from "../components/ui";
-import { IcPlay, IcSearch, IcVerified } from "../components/icons";
+import { IcSearch, IcVerified } from "../components/icons";
 import { useStore } from "../state/store";
-import { courses, fmt, hashtags, users } from "../data/store";
+import { useAuth } from "../state/auth";
+import { fmt } from "../data/store";
+import { IMG } from "../data/media";
 
-type Tab = "all" | "dancers" | "courses" | "challenges" | "hashtags" | "videos";
+/**
+ * Day 17 — DENSEN DISCOVER.
+ *
+ * Fully database-backed via discoverWire (searchAll / searchSuggestions /
+ * discoverFeed). Guests see the public catalog; signed-in dancers get the
+ * age-safe, privacy-respecting result set the server decides (the client
+ * never re-filters — the wire output is already the safe set).
+ */
+
+type ResultRow = {
+  id: string;
+  kind: string;
+  label: string;
+  subtitle?: string;
+  verified?: boolean;
+  level?: string;
+  priceCents?: number;
+  isFree?: boolean;
+  popularity?: number;
+  city?: string;
+};
+
+type Section = { id: string; title: string; results: ResultRow[] };
+
+type Tab = "all" | "classes" | "moves" | "dancers" | "challenges" | "hashtags";
+
+const TAB_KINDS: Record<Exclude<Tab, "all">, string[]> = {
+  classes: ["class", "course"],
+  moves: ["move", "combo", "choreography"],
+  dancers: ["dancer", "teacher"],
+  challenges: ["challenge"],
+  hashtags: ["hashtag", "style"],
+};
+
+const SECTION_ICONS: Record<string, string> = {
+  trending_moves: "🔥",
+  trending_choreos: "🎬",
+  teachers: "👑",
+  challenges: "⚡",
+  styles: "🪩",
+  beginner: "🎯",
+  rising: "🚀",
+  new_classes: "🆕",
+  under5: "💰",
+  free: "🆓",
+};
+
+const KIND_LABEL: Record<string, string> = {
+  dancer: "Dancer",
+  teacher: "Teacher",
+  move: "Move",
+  combo: "Combo",
+  choreography: "Choreography",
+  class: "Class",
+  course: "Course",
+  challenge: "Challenge",
+  style: "Style",
+  hashtag: "Hashtag",
+};
+
+/** Stable avatar/cover per row id (placeholder media registry). */
+const FALLBACKS = [
+  IMG.extra1, IMG.extra2, IMG.extra3, IMG.extra4, IMG.extra5, IMG.extra6,
+  IMG.extra7, IMG.extra8, IMG.extra9, IMG.extra10, IMG.extra11, IMG.extra12,
+];
+function fallbackFor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return FALLBACKS[h % FALLBACKS.length];
+}
+
+function priceLabel(r: ResultRow): string | null {
+  if (r.priceCents === undefined) return null;
+  if (r.isFree) return "Free";
+  return `€${(r.priceCents / 100).toFixed(2)}`;
+}
 
 export default function Discover() {
-  const { t, following, toggleFollow } = useStore();
+  const { t } = useStore();
+  const { sessionToken } = useAuth();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const [input, setInput] = useState(q);
   const [tab, setTab] = useState<Tab>("all");
+  const [focused, setFocused] = useState(false);
 
-  // Day 11 — live challenge catalog joins the discovery results.
-  const serverChallenges = useQuery(api.challengesWire.listChallenges, {});
-  const liveChallenges = useMemo(() => {
-    if (!serverChallenges?.ok) return [];
-    return (serverChallenges.challenges as {
-      id: string;
-      title: string;
-      style?: string;
-      phase: string;
-      daysLeft: number;
-      participantCount: number;
-      hasCompleted: boolean;
-    }[]).map((c) => ({
-      id: c.id,
-      title: c.title,
-      style: c.style ?? "DENSEN",
-      participants: c.participantCount,
-      daysLeft: c.daysLeft,
-      phase: c.phase,
-      hasCompleted: c.hasCompleted,
-    }));
-  }, [serverChallenges]);
+  useEffect(() => setInput(q), [q]);
 
-  const runSearch = (value: string) => setParams(value ? { q: value } : {});
+  const args = sessionToken ? { sessionToken } : {};
+  const feed = useQuery(api.discoverWire.discoverFeed, args) as
+    | { ok: boolean; sections: Section[] }
+    | undefined;
+  const search = useQuery(
+    api.discoverWire.searchAll,
+    q.trim().length >= 2 ? { ...args, q, kinds: tab === "all" ? undefined : TAB_KINDS[tab] } : "skip",
+  ) as { ok: boolean; total: number; results: ResultRow[] } | undefined;
+  const suggestions = useQuery(
+    api.discoverWire.searchSuggestions,
+    focused && input.trim().length >= 2
+      ? { sessionToken: sessionToken ?? undefined, q: input }
+      : "skip",
+  ) as { ok: boolean; suggestions: { text: string; kind: string }[] } | undefined;
 
-  const res = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return null;
-    const strip = s.replace("#", "");
-    return {
-      dancers: users.filter(
-        (u) =>
-          u.name.toLowerCase().includes(s) ||
-          u.username.toLowerCase().includes(s) ||
-          u.styles.some((x) => x.toLowerCase().includes(strip))
-      ),
-      teachers: users.filter((u) => u.teacher && (u.name.toLowerCase().includes(s) || u.styles.some((x) => x.toLowerCase().includes(strip)))),
-      courses: courses.filter(
-        (c) => c.title.toLowerCase().includes(s) || c.style.toLowerCase().includes(strip)
-      ),
-      challenges: liveChallenges.filter((c) => c.title.toLowerCase().includes(s) || c.style.toLowerCase().includes(strip)),
-      tags: hashtags.filter((h) => h.tag.toLowerCase().includes(strip ? `#${strip}` : s)),
-    };
-  }, [q, liveChallenges]);
+  const runSearch = (value: string) => {
+    setParams(value ? { q: value } : {});
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  };
 
-  const trending = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (s) {
-      return { dancers: res?.dancers ?? [], courses: res?.courses ?? [], challenges: res?.challenges ?? [] };
-    }
-    return {
-      dancers: [...users].sort((a, b) => b.followers - a.followers).slice(0, 6),
-      courses: courses.slice(0, 4),
-      challenges: liveChallenges.filter((c) => c.phase === "active").slice(0, 3),
-    };
-  }, [q, res, liveChallenges]);
+  const sections = useMemo(() => {
+    if (!feed?.ok) return [];
+    // Search mode replaces the rails; idle shows the themed rails.
+    return q.trim().length >= 2 ? [] : feed.sections;
+  }, [feed, q]);
+
+  const results = search?.ok ? search.results : [];
+  const suggestionList = suggestions?.ok ? suggestions.suggestions : [];
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "all", label: t("discover.all") },
+    { id: "classes", label: t("discover.courses") },
+    { id: "moves", label: t("discover.trendingMoves") },
     { id: "dancers", label: t("discover.dancers") },
-    { id: "courses", label: t("discover.courses") },
     { id: "challenges", label: t("nav.challenges") },
     { id: "hashtags", label: t("discover.hashtags") },
-    { id: "videos", label: t("discover.videos") },
   ];
+
+  const openRow = (r: ResultRow) => {
+    switch (r.kind) {
+      case "dancer":
+      case "teacher":
+        nav(`/user/${r.id}`);
+        break;
+      case "class":
+      case "course":
+        nav(`/course/${r.id}`);
+        break;
+      case "challenge":
+        nav(`/challenge/${r.id}`);
+        break;
+      case "hashtag":
+        runSearch(`#${r.label}`);
+        break;
+      case "style":
+        runSearch(r.label);
+        break;
+      default:
+        runSearch(r.label);
+    }
+  };
+
+  const rowCard = (r: ResultRow) => {
+    const price = priceLabel(r);
+    const kindLabel = KIND_LABEL[r.kind] ?? r.kind;
+    return (
+      <button
+        key={r.id}
+        onClick={() => openRow(r)}
+        className="panel panel-hover"
+        style={{
+          display: "flex", gap: 12, padding: 10, alignItems: "center",
+          cursor: "pointer", textAlign: "left", color: "inherit", width: "100%",
+        }}
+      >
+        {r.kind === "dancer" || r.kind === "teacher" ? (
+          <Avatar src={fallbackFor(r.id)} size={46} ring={r.kind === "teacher"} />
+        ) : (
+          <img
+            src={fallbackFor(r.id)}
+            alt=""
+            loading="lazy"
+            style={{ width: 62, height: 46, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+          />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 13.5, display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r.kind === "hashtag" ? `#${r.label}` : r.label}
+            </span>
+            {r.verified && <IcVerified />}
+          </div>
+          <div className="faint" style={{ fontSize: 11.5, marginTop: 2, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <span>{kindLabel}</span>
+            {r.level && <LevelBadge level={r.level} />}
+            {price && <span style={{ color: r.isFree ? "var(--gold)" : undefined, fontWeight: 700 }}>{price}</span>}
+            {r.city && <span>📍 {r.city}</span>}
+            {r.kind === "hashtag" && r.popularity !== undefined && r.popularity > 0 && (
+              <span>{fmt(r.popularity)} {t("discover.videos")}</span>
+            )}
+          </div>
+        </div>
+      </button>
+    );
+  };
 
   return (
     <Page>
       <h1 style={{ fontSize: 26, fontWeight: 800, marginBottom: 14 }}>{t("discover.title")}</h1>
 
+      {/* Search + live suggestions */}
       <div style={{ position: "relative", marginBottom: 14 }}>
         <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-faint)", display: "flex" }}>
           <IcSearch />
@@ -97,18 +219,48 @@ export default function Discover() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && runSearch(input)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => window.setTimeout(() => setFocused(false), 150)}
           style={{ paddingLeft: 42 }}
+          aria-label={t("discover.title")}
         />
-        {q && (
+        {input && (
           <button
             onClick={() => { setInput(""); runSearch(""); }}
+            aria-label={t("common.cancel")}
             style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--ink-faint)", fontSize: 18, cursor: "pointer" }}
           >
             ✕
           </button>
         )}
+        {focused && suggestionList.length > 0 && (
+          <div
+            className="panel"
+            style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 30, padding: 6, boxShadow: "var(--shadow-lg, 0 12px 32px rgba(0,0,0,0.35))" }}
+          >
+            {suggestionList.map((s) => (
+              <button
+                key={`${s.kind}:${s.text}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setInput(s.text); runSearch(s.text); }}
+                style={{
+                  display: "flex", width: "100%", alignItems: "center", gap: 10,
+                  background: "none", border: "none", color: "inherit",
+                  padding: "9px 10px", borderRadius: 9, cursor: "pointer", textAlign: "left",
+                }}
+              >
+                <span className="faint" style={{ fontSize: 13, width: 18, textAlign: "center" }}>
+                  {s.kind === "hashtag" ? "#" : s.kind === "dancer" || s.kind === "teacher" ? "👤" : s.kind === "challenge" ? "⚡" : s.kind === "style" ? "🪩" : "🎬"}
+                </span>
+                <span style={{ fontWeight: 600, fontSize: 13.5 }}>{s.text}</span>
+                <span className="faint" style={{ marginLeft: "auto", fontSize: 11 }}>{KIND_LABEL[s.kind] ?? s.kind}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Tabs */}
       <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 20 }}>
         {tabs.map((tb) => (
           <button key={tb.id} className={`chip${tab === tb.id ? " active" : ""}`} onClick={() => setTab(tb.id)}>
@@ -117,130 +269,68 @@ export default function Discover() {
         ))}
       </div>
 
-      {/* suggested chips when idle */}
-      {!q && tab === "all" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
-          {["Hip Hop", "Commercial", "Contemporary", "Salsa", "Jazz", "beginners"].map((s) => (
-            <button key={s} className="chip" onClick={() => { setInput(s); runSearch(s); }}>
-              {s}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {(tab === "all" || tab === "dancers") && (trending.dancers.length > 0 || !!q) && (
+      {/* ---------- SEARCH MODE ---------- */}
+      {q.trim().length >= 2 ? (
         <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 17, marginBottom: 12 }}>
-            {q ? t("discover.dancers") : t("discover.trendingDancers")}
+          <h2 style={{ fontSize: 16, marginBottom: 12 }}>
+            {search === undefined ? "…" : `${results.length} ${t("discover.noResults").split(" ")[0] === "No" ? "" : ""}`.trim() || ""}
+            {search !== undefined && <span className="faint" style={{ fontWeight: 500 }}> "{q}"</span>}
           </h2>
-          {trending.dancers.length === 0 ? (
-            <p className="muted" style={{ fontSize: 14 }}>{t("discover.noResults")} "{q}"</p>
+          {search === undefined ? (
+            <p className="muted" style={{ fontSize: 14 }}>…</p>
+          ) : results.length === 0 ? (
+            <p className="muted" style={{ fontSize: 14 }}>
+              {t("discover.noResults")} "{q}" — {t("discover.tryDifferent")}
+            </p>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
-              {trending.dancers.map((u) => (
-                <div key={u.id} className="panel panel-hover" style={{ padding: 15, display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 8 }}>
-                  <button onClick={() => nav(`/user/${u.id}`)} style={{ background: "none", border: "none", cursor: "pointer" }}>
-                    <Avatar src={u.avatar} size={62} ring={u.teacher} />
-                  </button>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 5, justifyContent: "center" }}>
-                      {u.name} {u.verified && <IcVerified />}
-                    </div>
-                    <div className="faint" style={{ fontSize: 12 }}>@{u.username} · {fmt(u.followers)} {t("profile.followers")}</div>
-                  </div>
-                  {u.id !== "me" && (
-                    <button className={`btn btn-sm ${following.has(u.id) ? "" : "btn-primary"}`} style={{ width: "100%" }} onClick={() => toggleFollow(u.id)}>
-                      {following.has(u.id) ? t("common.following") : t("common.follow")}
-                    </button>
-                  )}
-                </div>
-              ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {results.map(rowCard)}
             </div>
           )}
         </section>
-      )}
-
-      {(tab === "all" || tab === "courses") && trending.courses.length > 0 && (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 17, marginBottom: 12 }}>{q ? t("discover.courses") : t("discover.popularClasses")}</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-            {trending.courses.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => nav(`/course/${c.id}`)}
-                className="panel panel-hover"
-                style={{ textAlign: "left", padding: 0, overflow: "hidden", cursor: "pointer", color: "inherit" }}
-              >
-                <div style={{ position: "relative", aspectRatio: "16/9" }}>
-                  <img src={c.cover} alt="" className="media-cover" loading="lazy" />
-                  <span style={{ position: "absolute", right: 8, bottom: 8, background: "rgba(10,12,16,0.75)", borderRadius: 8, padding: "3px 8px", fontSize: 11, fontWeight: 700 }}>
-                    ★ {c.rating}
-                  </span>
-                </div>
-                <div style={{ padding: "11px 13px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.title}</div>
-                  <div className="faint" style={{ fontSize: 12, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                    <LevelBadge level={c.level} /> {c.lessons.length} {t("learn.lessons")}
-                  </div>
-                </div>
+      ) : (
+        <>
+          {/* ---------- IDLE: style chips + discover rails ---------- */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
+            {["Hip-Hop", "Commercial", "Contemporary", "Jazz", "Latin", "Beginner"].map((s) => (
+              <button key={s} className="chip" onClick={() => { setInput(s); runSearch(s); }}>
+                {s}
               </button>
             ))}
           </div>
-        </section>
-      )}
 
-      {(tab === "all" || tab === "challenges") && trending.challenges.length > 0 && (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 17, marginBottom: 12 }}>{q ? t("nav.challenges") : t("discover.trendingChallenges")}</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {trending.challenges.map((ch) => (
-              <button
-                key={ch.id}
-                onClick={() => nav(`/challenge/${ch.id}`)}
-                className="panel panel-hover"
-                style={{ display: "flex", gap: 13, padding: 12, alignItems: "center", cursor: "pointer", textAlign: "left", color: "inherit", width: "100%" }}
-              >
-                <span style={{ width: 76, height: 58, borderRadius: 11, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, background: "linear-gradient(135deg, var(--gold-line), var(--panel-2))", opacity: 0.85 }}>
-                  🏁
-                </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{ch.title}</div>
-                  <div className="faint" style={{ fontSize: 12, marginTop: 3 }}>
-                    🔥 {fmt(ch.participants)} {t("challenges.participants")} · {ch.phase === "active" && ch.daysLeft > 0 ? `${ch.daysLeft} ${t("challenges.daysLeft")}` : ch.phase}
-                  </div>
-                </div>
-                <IcPlay size={16} />
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {(tab === "all" || tab === "hashtags") && (
-        <section style={{ marginBottom: 28 }}>
-          <h2 style={{ fontSize: 17, marginBottom: 12 }}>{t("discover.hashtags")}</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10 }}>
-            {hashtags
-              .filter((h) => !q || h.tag.toLowerCase().includes(q.toLowerCase().replace("#", "")))
-              .map((h) => (
-                <button
-                  key={h.tag}
-                  className="panel panel-hover"
-                  onClick={() => { setInput(h.tag); runSearch(h.tag); }}
-                  style={{ padding: "13px 15px", textAlign: "left", cursor: "pointer", color: "inherit", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          {feed === undefined ? (
+            <p className="muted" style={{ fontSize: 14, textAlign: "center", padding: "24px 0" }}>…</p>
+          ) : (
+            sections.map((sec) => (
+              <section key={sec.id} style={{ marginBottom: 28 }}>
+                <h2 style={{ fontSize: 17, marginBottom: 12 }}>
+                  {SECTION_ICONS[sec.id] ?? "✨"} {t(`discover.rail.${sec.id}` as never)}
+                </h2>
+                <div
+                  className="no-scrollbar"
+                  style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}
                 >
-                  <span style={{ fontWeight: 800, color: "var(--gold)", fontSize: 14 }}>{h.tag}</span>
-                  <span className="faint" style={{ fontSize: 12 }}>{fmt(h.posts)} {t("discover.videos")}</span>
-                </button>
-              ))}
-          </div>
-        </section>
-      )}
+                  {sec.results.map((r) => (
+                    <div key={r.id} style={{ flex: "0 0 auto", width: sec.id === "styles" ? 150 : 230 }}>
+                      {rowCard(r)}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))
+          )}
 
-      {tab === "videos" && (
-        <p className="muted" style={{ textAlign: "center", padding: "30px 0" }}>
-          {t("feed.forYou")} → <button className="btn btn-sm btn-primary" onClick={() => nav("/")}>Open feed</button>
-        </p>
+          {/* Guest CTA — the safe public rails end here; sign in unlocks people search */}
+          {!sessionToken && (
+            <div className="panel" style={{ padding: 18, textAlign: "center", marginBottom: 20 }}>
+              <p style={{ margin: "0 0 10px", fontWeight: 700, fontSize: 14 }}>{t("discover.guestCta")}</p>
+              <button className="btn btn-primary" onClick={() => nav("/register")}>
+                {t("auth.submit")}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </Page>
   );
