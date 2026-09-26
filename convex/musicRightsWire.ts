@@ -16,6 +16,7 @@
  */
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { notifyUser } from "./notifyInternals";
 
 import {
   canTransitionClaim,
@@ -88,15 +89,8 @@ async function notify(
   db: any,
   n: { userId: string; actorUserId?: string; type: string; targetType?: string; targetId?: string; now: number }
 ): Promise<void> {
-  await db.insert("notifications", {
-    userId: n.userId as never,
-    actorUserId: n.actorUserId ? (n.actorUserId as never) : undefined,
-    type: n.type,
-    targetType: n.targetType,
-    targetId: n.targetId,
-    read: false,
-    createdAt: n.now,
-  } as never);
+  // Day 16 — routed through the pref-checked emit (category mutes + no-self-notify).
+  await notifyUser(db, n as never);
 }
 
 function projectRecord(row: any): MusicRecord & { id: string; addedByUserId?: string; createdAt: number; updatedAt: number } {

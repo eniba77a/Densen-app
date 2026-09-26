@@ -43,6 +43,8 @@ import {
   LOCKOUT_WINDOW_MS,
 } from "./authInternals";
 import { SIGNUP_CONSENT_VERSIONS } from "./privacyInternals";
+import { ensureNotificationDefaults } from "./notificationsWire";
+import { notifySecurity } from "./socialEvents";
 import {
   SESSION_TTL_MS,
   sessionValid,
@@ -167,6 +169,11 @@ export const signUp = mutationGeneric({
         : "signup: account created",
       createdAt: now.getTime(),
     });
+
+    // Day 16 — age-aware notification defaults: children/teens start with a
+    // quiet inbox (only the essentials + safety deliver). User choices made
+    // later always win (ensure… never overwrites an existing row).
+    await ensureNotificationDefaults(ctx.db, userId, rows.user.ageBand, now.getTime());
 
     // ---- 8. Email verification initiation (Resend via internal action) ----
     // Scheduling from a mutation is transactional: if the mutation commits,
@@ -673,6 +680,11 @@ export const changePassword = mutationGeneric({
       summary: "password_changed",
       createdAt: now,
     });
+
+    // Day 16 — SECURITY notification: the security category is never mutable,
+    // so this always delivers to the notification center (in-app only; no
+    // fake push).
+    await notifySecurity(ctx.db, { type: "security_password_changed", userId: session.userId, now });
     return { ok: true as const };
   },
 });

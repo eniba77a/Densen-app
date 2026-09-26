@@ -28,6 +28,7 @@ import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 
 import { callerFromToken } from "./content";
+import { notifyUser } from "./notifyInternals";
 import {
   decideAppealReview,
   decideAppealSubmission,
@@ -93,21 +94,8 @@ async function appendAudit(
   } as never);
 }
 
-async function notify(
-  db: any,
-  n: { userId: string; actorUserId?: string; type: string; targetType?: string; targetId?: string; now: number }
-): Promise<void> {
-  if (n.actorUserId && n.actorUserId === n.userId) return;
-  await db.insert("notifications", {
-    userId: n.userId as never,
-    actorUserId: n.actorUserId ? (n.actorUserId as never) : undefined,
-    type: n.type,
-    targetType: n.targetType,
-    targetId: n.targetId,
-    read: false,
-    createdAt: n.now,
-  });
-}
+// Day 16 — the local raw-notify wrapper was replaced by the shared
+// pref-checked emit (notifyUser) at every call site.
 
 /** Resolve the human owner of a report target (null when the row is gone). */
 async function targetOwner(
@@ -483,7 +471,7 @@ export const takeModerationAction = mutationGeneric({
     // Notify the affected user — with the appeal path — without ever
     // exposing the reporter's identity.
     if (owner.ownerId && action !== "dismiss") {
-      await notify(ctx.db, {
+      await notifyUser(ctx.db, {
         userId: owner.ownerId,
         actorUserId: staff.userId,
         type: "moderation_action",
@@ -787,7 +775,7 @@ export const reviewAppeal = mutationGeneric({
       summary: `appeal_${args.to}; effect:${effect}`,
       now,
     });
-    await notify(ctx.db, {
+    await notifyUser(ctx.db, {
       userId: appeal.appellantUserId,
       actorUserId: staff.userId,
       type: "appeal_reviewed",

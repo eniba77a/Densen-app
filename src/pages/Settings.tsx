@@ -286,6 +286,9 @@ export default function Settings() {
         </div>
       </Section>
 
+      {/* Day 16 — notification category preferences (server-backed when signed in) */}
+      <NotificationPrefsSection />
+
       {/* email preferences */}
       <Section id="email" title={`✉️ ${t("gov.email.title")}`}>
         <p className="faint" style={{ fontSize: 12.5, margin: "-6px 0 10px" }}>{t("gov.email.sub")}</p>
@@ -497,6 +500,72 @@ export default function Settings() {
 
       {gate && <PermissionGate permission={gate} onDone={() => setGate(null)}>{null}</PermissionGate>}
     </Page>
+  );
+}
+
+/* ---------------- Day 16 — notification preferences ---------------- */
+
+interface NotifPrefsResult {
+  ok: boolean;
+  mutedCategories?: string[];
+  categories?: string[];
+  mutableCategories?: string[];
+  securityAlwaysOn?: boolean;
+  ageBand?: string;
+}
+
+function NotificationPrefsSection() {
+  const { t } = useStore();
+  const { sessionToken } = useAuth();
+  const setPref = useMutation(api.notificationsWire.setNotificationPref);
+  const data = useQuery(
+    api.notificationsWire.getNotificationPrefs,
+    sessionToken ? { sessionToken } : "skip"
+  );
+  const prefs = data && typeof data === "object" && "ok" in data && data.ok ? (data as unknown as NotifPrefsResult) : null;
+  const muted = new Set(prefs?.mutedCategories ?? []);
+  const categories = prefs?.categories ?? [];
+  const mutable = new Set(prefs?.mutableCategories ?? []);
+
+  const toggle = (category: string, enable: boolean) => {
+    if (!sessionToken) return;
+    void setPref({ sessionToken, category, enable }).catch(() => undefined);
+  };
+
+  return (
+    <Section id="notifications" title={`🔔 ${t("notifications.settings")}`}>
+      {!sessionToken ? (
+        <div className="panel" style={{ padding: 16 }}>
+          <p className="faint" style={{ fontSize: 13, margin: 0 }}>{t("messages.needAccount")}</p>
+        </div>
+      ) : !prefs ? (
+        <div className="panel" style={{ padding: 16 }}>
+          <p className="faint" style={{ fontSize: 13, margin: 0 }}>…</p>
+        </div>
+      ) : (
+        <div className="panel" style={{ padding: "8px 16px 12px" }}>
+          <p className="faint" style={{ fontSize: 12.5, margin: "8px 0 4px" }}>{t("notifications.prefHint")}</p>
+          {categories.map((category) => {
+            const canMute = mutable.has(category);
+            const isMuted = muted.has(category);
+            return (
+              <Row
+                key={category}
+                label={t(("notifications.cat." + category) as never)}
+                sub={canMute ? undefined : t("notifications.cat.security")}
+              >
+                <Toggle
+                  on={!isMuted}
+                  label={t(("notifications.cat." + category) as never)}
+                  disabled={!canMute}
+                  onChange={(v) => toggle(category, v)}
+                />
+              </Row>
+            );
+          })}
+        </div>
+      )}
+    </Section>
   );
 }
 

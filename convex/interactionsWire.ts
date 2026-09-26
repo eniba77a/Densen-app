@@ -9,6 +9,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { callerFromToken } from "./content";
+import { notifyUser } from "./notifyInternals";
 import {
   decideCommentQuickReaction,
   decideInteraction,
@@ -152,16 +153,16 @@ export const interact = mutationGeneric({
       });
     }
 
-    // Notify the author (never self-notify).
+    // Notify the author (never self-notify; Day 16: the recipient's energy/
+    // shares/practice/challenge category mutes are honored at write time).
     if (!decision.isToggleOff && post && post.userId !== c.caller.userId) {
-      await ctx.db.insert("notifications", {
+      await notifyUser(ctx.db, {
         userId: post.userId as never,
         actorUserId: c.caller.userId as never,
         type: `interaction_${args.action}`,
         targetType: "post",
         targetId: args.postId,
-        read: false,
-        createdAt: now,
+        now,
       });
     }
 
