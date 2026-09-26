@@ -24,6 +24,8 @@ import type * as content from "../content.js";
 import type * as credits from "../credits.js";
 import type * as creditsInternals from "../creditsInternals.js";
 import type * as creditsWire from "../creditsWire.js";
+import type * as discover from "../discover.js";
+import type * as discoverWire from "../discoverWire.js";
 import type * as fingerprinting from "../fingerprinting.js";
 import type * as interactions from "../interactions.js";
 import type * as interactionsWire from "../interactionsWire.js";
@@ -81,6 +83,8 @@ declare const fullApi: ApiFromModules<{
   credits: typeof credits;
   creditsInternals: typeof creditsInternals;
   creditsWire: typeof creditsWire;
+  discover: typeof discover;
+  discoverWire: typeof discoverWire;
   fingerprinting: typeof fingerprinting;
   interactions: typeof interactions;
   interactionsWire: typeof interactionsWire;
