@@ -26,6 +26,8 @@ import {
   evaluateContactPatternCore,
 } from "./safetyCore";
 import { evaluateMusicUse } from "./musicRights";
+import { conversationMembersOf, ensureConversationMembers } from "./messagingInternals";
+import { notifyUser } from "./notifyInternals";
 import type { Caller, Role } from "./security";
 
 /* ================================================================== */
@@ -265,7 +267,9 @@ export const createComment = mutationGeneric({
     if (delta !== 0 && post) {
       await ctx.db.patch(post._id as never, { commentCount: Math.max(0, (post as any).commentCount + delta) });
     }
-    await notify(ctx.db, {
+    // Day 16 — pref-checked emit: the recipient's comment mutes are honored
+    // at write time (decideDelivery), not filtered client-side.
+    await notifyUser(ctx.db, {
       userId: decision.notifyUserId,
       actorUserId: caller.userId,
       type: "comment",
@@ -524,16 +528,16 @@ export const createPost = mutationGeneric({
       updatedAt: now,
     });
 
-    // Notify the original creator that their work was reused (audit + bell).
+    // Notify the original creator that their work was reused (audit + bell;
+    // Day 16 — pref-checked emit: shares-category mutes honored).
     if (originalCreatorId) {
-      await ctx.db.insert("notifications", {
-        userId: originalCreatorId as never,
-        actorUserId: caller.userId as never,
+      await notifyUser(ctx.db, {
+        userId: originalCreatorId,
+        actorUserId: caller.userId,
         type: remixOfPostId ? "interaction_remix" : "interaction_duet",
         targetType: "post",
         targetId: postId,
-        read: false,
-        createdAt: now,
+        now,
       });
     }
 
@@ -715,11 +719,11 @@ export const sendMessage = mutationGeneric({
       .collect()) as { followeeId: string }[];
     const recipientFollowsCaller = recFollows.some((f) => f.followeeId === caller.userId);
 
-    // Existing direct thread between the two (bounded member-index scan).
-    const myConversations = (await ctx.db
-      .query("conversations")
-      .withIndex("by_member", (q: any) => q.eq("memberUserIds", caller.userId as never))
-      .collect()) as { _id: string; kind: string; memberUserIds: string[]; guardianVisible: boolean }[];
+    // Existing direct thread between the two (per-member mirror lookup —
+    // the array-field `by_member` index cannot answer membership probes).
+    const myConversations = (await conversationMembersOf(ctx.db, String(caller.userId))) as {
+      _id: string; kind: string; memberUserIds: string[]; guardianVisible: boolean;
+    }[];
     const existing =
       myConversations.find(
         (c) =>
@@ -731,7 +735,7 @@ export const sendMessage = mutationGeneric({
     // Caller's verified-teacher state from the schema state machine only.
     const myTeacher = (await ctx.db
       .query("teacherProfiles")
-      .withIndex("teacherId", (q: any) => q.eq("teacherId", caller.userId as never))
+      .withIndex("userId", (q: any) => q.eq("userId", caller.userId as never))
       .unique()) as { verificationStatus?: string } | null;
     const callerIsVerifiedTeacher = myTeacher?.verificationStatus === "verified";
 
@@ -777,6 +781,11 @@ export const sendMessage = mutationGeneric({
         guardianVisible: decision.guardianVisible,
         createdAt: now,
       })) as string;
+      await ctx.db.insert("conversationMembers", { conversationId: conversationId as never, userId: caller.userId as never, createdAt: now });
+      await ctx.db.insert("conversationMembers", { conversationId: conversationId as never, userId: args.recipientId as never, createdAt: now });
+    } else {
+      // Legacy thread (pre-mirror): backfill so the next list lookup is index-backed.
+      await ensureConversationMembers(ctx.db, conversationId as string);
     }
 
     await ctx.db.insert("messages", {
@@ -789,7 +798,8 @@ export const sendMessage = mutationGeneric({
     });
 
     await ctx.db.patch(conversationId as never, { lastMessageAt: now });
-    await notify(ctx.db, {
+    // Day 16 — pref-checked emit (recipient's message mutes honored).
+    await notifyUser(ctx.db, {
       userId: args.recipientId,
       actorUserId: caller.userId,
       type: "message",
@@ -799,12 +809,14 @@ export const sendMessage = mutationGeneric({
     });
     await ctx.db.insert("auditLogs", {
       actorUserId: caller.userId as never,
-      action:
+      eventType:
         decision.watchlist === "restrict" || decision.watchlist === "watch"
           ? `contact_pattern_${decision.watchlist}`
           : decision.flagged
             ? "message_flagged_grooming_review"
             : "message_delivered",
+      targetType: "conversation",
+      targetId: conversationId as string,
       summary: `dm gate; guardianVisible:${decision.guardianVisible}`,
       createdAt: now,
     });

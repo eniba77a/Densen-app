@@ -27,6 +27,7 @@ import {
   type Role,
 } from "./security";
 import { publicProfileOf, vReactionKind, type PublicProfileDTO } from "./validators";
+import { notifyFollow } from "./socialEvents";
 
 /* ================================================================== */
 /*                          Pure decision cores                       */
@@ -262,6 +263,15 @@ export const toggleFollow = mutationGeneric({
           followingCount: Math.max(0, callerProfile.followingCount + deltas.callerFollowingDelta),
         });
       }
+    }
+
+    // Day 16 — new-follower notification (pref-checked; no self-notify).
+    if (decision.action === "insert" && followee && caller) {
+      await notifyFollow(ctx.db, {
+        followerUserId: caller.userId,
+        followedUserId: decision.followeeId,
+        now: Date.now(),
+      });
     }
 
     return { ok: true as const, following: decision.action === "insert" };

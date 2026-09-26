@@ -784,7 +784,21 @@ const messages = defineTable({
   body: v.optional(v.string()),
   // Rich payloads share DENSEN content into chats (lessons, posts, choreography)
   attachmentType: v.optional(
-    v.union(v.literal("video"), v.literal("photo"), v.literal("lesson"), v.literal("post"), v.literal("choreography"))
+    v.union(v.literal("video"), v.literal("photo"), v.literal("lesson"), v.literal("post"), v.literal("choreography"), v.literal("course"), v.literal("combo"), v.literal("challenge"))
+  ),
+  /** Day 16 — the typed share vocabulary (video | class | course | combo |
+   *  choreography | post | challenge invite). Mirrors attachmentType with
+   *  the challenge-invite semantic the client renders distinctly. */
+  shareKind: v.optional(
+    v.union(
+      v.literal("video"),
+      v.literal("class"),
+      v.literal("course"),
+      v.literal("combo"),
+      v.literal("choreography"),
+      v.literal("post"),
+      v.literal("challenge_invite")
+    )
   ),
   attachmentRef: v.optional(v.string()),
   attachmentTitle: v.optional(v.string()),
@@ -795,6 +809,49 @@ const messages = defineTable({
 })
   .index("by_conversation_time", ["conversationId", "createdAt"]) // chat history
   .index("by_sender", ["senderId", "createdAt"]); // contact-pattern analysis
+
+/**
+ * Day 16 — CONVERSATION MEMBERSHIP (per-member mirror rows).
+ *
+ * Convex array-field index entries only match the FULL array value, so the
+ * `conversations.by_member` index cannot answer "threads for user X" when a
+ * member is one of several in `memberUserIds`. This mirror table keeps one
+ * scalar row per member so membership lookups are real index probes. Written
+ * in the same mutation that inserts the conversation (atomic); the legacy
+ * content.ts DM path is backfilled lazily on next use (additive, zero-risk).
+ */
+const conversationMembers = defineTable({
+  conversationId: v.id("conversations"),
+  userId: v.id("users"),
+  createdAt: v.number(),
+})
+  .index("by_user", ["userId"])
+  .index("by_conversation", ["conversationId"]);
+
+/**
+ * Day 16 — CONVERSATION READ STATE. One row per (user, conversation): the
+ * timestamp up to which the user has read the thread. Unread counts are
+ * derived server-side (messages after lastReadAt) — no client bookkeeping.
+ */
+const conversationReads = defineTable({
+  userId: v.id("users"),
+  conversationId: v.id("conversations"),
+  lastReadAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_member_read", ["userId", "conversationId"]) // uniqueness lookup
+  .index("by_conversation", ["conversationId"]); // per-thread read state
+
+/**
+ * Day 16 — NOTIFICATION PREFERENCES. One row per user; the categories the
+ * user opted OUT of (muted). The `security` category is never mutable
+ * (decidePrefChange rejects it) — security notices always deliver.
+ */
+const notificationPrefs = defineTable({
+  userId: v.id("users"),
+  mutedCategories: v.array(v.string()), // closed union enforced at the boundary
+  updatedAt: v.number(),
+}).index("by_user", ["userId"]); // one row per user
 
 const notifications = defineTable({
   userId: v.id("users"), // recipient
@@ -1313,8 +1370,11 @@ export default defineSchema({
   moderationActions,
   blocks,
   conversations,
+  conversationMembers,
   messages,
+  conversationReads,
   notifications,
+  notificationPrefs,
   challenges,
   challengeParticipants,
   challengeSubmissions,

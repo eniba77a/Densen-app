@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 import { conversations, notifications } from "../data/store";
 import { ME, useStore } from "../state/store";
 import { useAuth } from "../state/auth";
@@ -27,6 +29,28 @@ import type { TKey } from "../i18n";
 const unreadNotifs = notifications.filter((n) => !n.read).length;
 const unreadChats = conversations.length;
 
+/**
+ * Day 16 — live unread counts from the server when signed in; the prototype
+ * mirrors stay the guest fallback. Bell + chat dots are real state now.
+ */
+function useLiveBadges(sessionToken: string | null): { notifs: number; chats: number } {
+  const notifData = useQuery(
+    api.notificationsWire.listMyNotifications,
+    sessionToken ? { sessionToken, limit: 1 } : "skip"
+  );
+  const convoData = useQuery(
+    api.messagingWire.listMyConversations,
+    sessionToken ? { sessionToken } : "skip"
+  );
+  if (!sessionToken) return { notifs: unreadNotifs, chats: unreadChats };
+  const notifs = notifData && typeof notifData === "object" && "ok" in notifData && notifData.ok ? notifData.unread : 0;
+  const chats =
+    convoData && typeof convoData === "object" && "ok" in convoData && convoData.ok
+      ? (convoData.conversations as { unread: number }[]).reduce((n, c) => n + c.unread, 0)
+      : 0;
+  return { notifs, chats };
+}
+
 function useTKey() {
   const { t } = useStore();
   return t;
@@ -37,6 +61,8 @@ function TopBar() {
   const t = useTKey();
   const nav = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+  const { sessionToken } = useAuth();
+  const badges = useLiveBadges(sessionToken);
 
   useEffect(() => {
     const fn = () => setScrolled(window.scrollY > 8);
@@ -84,7 +110,7 @@ function TopBar() {
           style={{ position: "relative" }}
         >
           <IcMessage />
-          {unreadChats > 0 && <RedDot />}
+          {badges.chats > 0 && <RedDot />}
         </button>
         <button
           className="btn btn-icon btn-ghost"
@@ -93,7 +119,7 @@ function TopBar() {
           style={{ position: "relative" }}
         >
           <IcBell />
-          {unreadNotifs > 0 && <RedDot />}
+          {badges.notifs > 0 && <RedDot />}
         </button>
         <button onClick={() => nav("/profile")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
           <Avatar src={ME.avatar} size={34} ring />

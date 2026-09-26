@@ -15,6 +15,7 @@
  */
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { notifyUser } from "./notifyInternals";
 
 import {
   DEFAULT_STEPS,
@@ -283,6 +284,27 @@ export const completeItem = mutationGeneric({
     const milestoneXp = await foldStreakForActivity(ctx.db, c.userId, now);
     const stats = await statsFor(ctx.db, c.userId);
     const newAchievements = await evaluateAchievements(ctx.db, c.userId, c.userStatus, stats, now);
+
+    // Day 16 — real notifications for MY PRACTICE completions: a class/
+    // course-item completion (learning) and each newly unlocked achievement.
+    // Both flow through the pref-checked emit — no fake pushes, rows in the
+    // real notification center only.
+    await notifyUser(ctx.db, {
+      userId: c.userId,
+      type: "class_completed",
+      targetType: "practice_item",
+      targetId: args.itemId,
+      now,
+    });
+    for (const code of newAchievements) {
+      await notifyUser(ctx.db, {
+        userId: c.userId,
+        type: "achievement_unlocked",
+        targetType: "achievement",
+        targetId: code,
+        now,
+      });
+    }
 
     return {
       ok: true as const,

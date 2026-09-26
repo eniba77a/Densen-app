@@ -33,7 +33,8 @@ import {
 } from "./payments";
 import { accessModelOf } from "./learning";
 import { getPaymentProvider, isPaymentsConfigured } from "./paymentProvider";
-import { callerFromToken, notify } from "./content";
+import { callerFromToken } from "./content";
+import { notifyUser } from "./notifyInternals";
 import { requireRole } from "./security";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -250,7 +251,7 @@ export const applyProviderEvent = mutationGeneric({
 
     // Notify the buyer on the state change that matters to them.
     if (decision.purchaseStatus === "paid") {
-      await notify(db, { userId: purchase!.userId, type: "purchase_paid", targetType: "purchase", targetId: purchase!._id as string, now });
+      await notifyUser(db, { userId: purchase!.userId, type: "purchase_paid", targetType: "purchase", targetId: purchase!._id as string, now });
     }
     await db.insert("auditLogs", {
       eventType: "payment_event",
@@ -555,7 +556,7 @@ export const reviewRefundRequest = mutationGeneric({
         summary: "rejected",
         createdAt: now,
       });
-      await notify(db, { userId: req.userId as string, actorUserId: staff.userId, type: "refund_rejected", targetType: "purchase", targetId: req.purchaseId as string, now });
+      await notifyUser(db, { userId: req.userId as string, actorUserId: staff.userId, type: "refund_rejected", targetType: "purchase", targetId: req.purchaseId as string, now });
       return { ok: true as const, status: "rejected" as const };
     }
 
@@ -572,7 +573,7 @@ export const reviewRefundRequest = mutationGeneric({
       summary: `status->${status}; provider refund pending`,
       createdAt: now,
     });
-    await notify(db, { userId: req.userId as string, actorUserId: staff.userId, type: "refund_" + status, targetType: "purchase", targetId: req.purchaseId as string, now });
+    await notifyUser(db, { userId: req.userId as string, actorUserId: staff.userId, type: "refund_" + status, targetType: "purchase", targetId: req.purchaseId as string, now });
     return { ok: true as const, status };
   },
 });

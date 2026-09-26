@@ -10,6 +10,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { callerFromToken } from "./content";
+import { notifyUser } from "./notifyInternals";
 import { grantActivityXp } from "./arcadeInternals";
 import { awardBadge, ensureAchievementsSeed, evaluateAchievements, statsFor } from "./achievementsInternals";
 import { daysLeftOf, decideComplete, decideJoin, decideSubmit, phaseOf } from "./challenges";
@@ -294,6 +295,18 @@ export const joinChallenge = mutationGeneric({
       joinedAt: now,
     });
     await ctx.db.patch(row._id as never, { participantCount: (row.participantCount ?? 0) + 1 } as never);
+    // Day 16 — challenge_joined notification for the challenge's teacher
+    // (pref-checked; participants don't notify themselves).
+    if (row.teacherId && String(row.teacherId) !== String(c.userId)) {
+      await notifyUser(ctx.db, {
+        userId: String(row.teacherId),
+        actorUserId: c.userId,
+        type: "challenge_joined",
+        targetType: "challenge",
+        targetId: args.challengeId,
+        now,
+      });
+    }
     await ctx.db.insert("auditLogs", {
       actorUserId: c.userId as never,
       eventType: "challenge_event",
