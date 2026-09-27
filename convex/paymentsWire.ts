@@ -52,11 +52,23 @@ type Db = any;
  *  3. `classes` rows (studio-published) — server pricing is authoritative.
  * Returns null when nothing sellable matches.
  */
+/**
+ * Day 20 audit fix: `db.get` throws on a MALFORMED document id (wrong
+ * length/charset) instead of returning null — a junk client-supplied id in the
+ * money path used to surface as an HTTP 500. A malformed id simply cannot
+ * exist as a row, so treat it as not-found and let the normal deny logic run.
+ */
+async function safeGet<T>(db: Db, id: string): Promise<T | null> {
+  try {
+    return (await db.get(id as never)) as T | null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolvePurchasable(db: Db, classId: string, seedPricing?: { priceCents: number; creditPrice: number }): Promise<PurchasableClass | null> {
   // 1. Convex course row?
-  const course = (await db.get(classId as never)) as
-    | { teacherId?: string; priceCents?: number; creditPrice?: number; currency?: string; status?: string }
-    | null;
+  const course = await safeGet<{ teacherId?: string; priceCents?: number; creditPrice?: number; currency?: string; status?: string }>(db, classId);
   if (course && course.priceCents !== undefined && course.currency !== undefined && course.status === "published") {
     return {
       courseId: classId,
@@ -65,7 +77,7 @@ async function resolvePurchasable(db: Db, classId: string, seedPricing?: { price
     };
   }
   // 2. Studio-published class row?
-  const cls = (await db.get(classId as never)) as { teacherId?: string; priceCents?: number; creditPrice?: number; status?: string } | null;
+  const cls = await safeGet<{ teacherId?: string; priceCents?: number; creditPrice?: number; status?: string }>(db, classId);
   if (cls && cls.teacherId !== undefined && cls.priceCents !== undefined && cls.status === "published") {
     return {
       courseId: classId,
@@ -279,7 +291,7 @@ export const requestRefund = mutationGeneric({
     const caller = await callerFromToken(db, args.sessionToken);
     if (!caller) return { ok: false as const, error: "unauthenticated" as const };
 
-    const purchase = (await db.get(args.purchaseId as never)) as { _id: string; userId: string; status: string } | null;
+    const purchase = await safeGet<{ _id: string; userId: string; status: string }>(db, args.purchaseId);
     const openRequests = purchase
       ? ((await db
           .query("refundRequests")
@@ -541,7 +553,7 @@ export const reviewRefundRequest = mutationGeneric({
     const db = ctx.db;
     const staff = requireRole(await callerFromToken(db, args.sessionToken), "moderator");
 
-    const req = (await db.get(args.refundId as never)) as { _id: string; purchaseId: string; userId: string; status: string } | null;
+    const req = await safeGet<{ _id: string; purchaseId: string; userId: string; status: string }>(db, args.refundId);
     if (!req) return { ok: false as const, error: "no_such_request" as const };
     if (req.status === "refunded" || req.status === "rejected") return { ok: false as const, error: "request_closed" as const };
 

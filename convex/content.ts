@@ -342,6 +342,8 @@ export const listComments = queryGeneric({
 export interface PostDecisionInput {
   caller: Caller | null;
   caption: string;
+  /** True when the caller's own row records a minor (child/teen band). */
+  callerIsMinor: boolean;
   /** Server-side scan result (already computed by the wire layer). */
   scan: { status: "published" | "in_review" | "blocked"; ruleIds: string[] };
 }
@@ -354,6 +356,9 @@ export type PostDecision =
  * Decide a post publish. The scan result comes from scanVideoSubmissionCore —
  * blocked content is never stored; review content is stored as "in_review"
  * (invisible in feeds until a moderator approves).
+ *
+ * Day 20 child-safety hardening: a minor's post is NEVER auto-published —
+ * even a scan-clean post lands in the human moderation queue first.
  */
 export function decidePost(input: PostDecisionInput): PostDecision {
   if (!input.caller) return { action: "deny", error: "unauthenticated" };
@@ -361,6 +366,7 @@ export function decidePost(input: PostDecisionInput): PostDecision {
   const caption = input.caption.trim();
   if (caption.length === 0 || caption.length > 2200) return { action: "deny", error: "invalid_caption" };
   if (input.scan.status === "blocked") return { action: "deny", error: "blocked_by_safety" };
+  if (input.callerIsMinor) return { action: "insert", status: "in_review" };
   return { action: "insert", status: input.scan.status };
 }
 
@@ -411,6 +417,7 @@ export const createPost = mutationGeneric({
     const decision = decidePost({
       caller,
       caption: args.caption,
+      callerIsMinor: creatorIsMinor,
       scan,
     });
     if (decision.action === "deny") return { ok: false as const, error: decision.error, ruleIds: scan.ruleIds };

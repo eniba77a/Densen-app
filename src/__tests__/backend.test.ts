@@ -29,6 +29,7 @@ import {
 } from "../../convex/validators";
 import { appendAudit, type AuditEntry } from "../../convex/auditInternals";
 import { decideFollow, followCountDeltas, decideReaction, reactionCountDelta } from "../../convex/social";
+import { decidePost } from "../../convex/content";
 import {
   getMediaProvider,
   isMediaConfigured,
@@ -414,5 +415,50 @@ describe("audit log", () => {
     expect(rows[0].eventType).toBe("follow");
     expect(typeof rows[0].createdAt).toBe("number");
     // The module exports no update/delete helpers — immutability by construction.
+  });
+});
+
+/* ================= Day 20 audit — child-safety publish cap ================= */
+
+describe("content: decidePost minor cap (Day 20 audit)", () => {
+  const adultCaller: Caller = { userId: "u_adult", role: "user", userStatus: "active" };
+  const cleanScan = { status: "published" as const, ruleIds: [] };
+
+  it("adult + clean scan ⇒ published", () => {
+    expect(
+      decidePost({ caller: adultCaller, caption: "new combo drop", callerIsMinor: false, scan: cleanScan })
+    ).toEqual({ action: "insert", status: "published" });
+  });
+
+  it("minor + CLEAN scan is still HELD for human review (never auto-published)", () => {
+    expect(
+      decidePost({ caller: adultCaller, caption: "clean teen post", callerIsMinor: true, scan: cleanScan })
+    ).toEqual({ action: "insert", status: "in_review" });
+  });
+
+  it("minor + review-level scan ⇒ in_review (cap keeps the stricter state)", () => {
+    const heldScan = { status: "in_review" as const, ruleIds: ["audio_unlicensed"] };
+    expect(
+      decidePost({ caller: adultCaller, caption: "teen freestyle", callerIsMinor: true, scan: heldScan })
+    ).toEqual({ action: "insert", status: "in_review" });
+  });
+
+  it("blocked scan denies regardless of age", () => {
+    const blockedScan = { status: "blocked" as const, ruleIds: ["images"] };
+    expect(
+      decidePost({ caller: adultCaller, caption: "add me on whatsapp", callerIsMinor: false, scan: blockedScan })
+    ).toEqual({ action: "deny", error: "blocked_by_safety" });
+  });
+
+  it("unauthenticated + suspended still fail closed", () => {
+    expect(decidePost({ caller: null, caption: "hi", callerIsMinor: false, scan: cleanScan })).toEqual({
+      action: "deny",
+      error: "unauthenticated",
+    });
+    const suspended: Caller = { userId: "u_s", role: "user", userStatus: "suspended" };
+    expect(decidePost({ caller: suspended, caption: "hi", callerIsMinor: false, scan: cleanScan })).toEqual({
+      action: "deny",
+      error: "caller_restricted",
+    });
   });
 });

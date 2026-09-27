@@ -141,7 +141,7 @@ export const saveItem = mutationGeneric({
     if (dup) return { ok: true as const, itemId: String(dup._id), alreadySaved: true as const };
 
     const labels = args.steps && args.steps.length > 0 ? args.steps.map((s: any) => String(s).trim().slice(0, 120)).filter(Boolean) : DEFAULT_STEPS[args.kind as PracticeKind];
-    await ctx.db.insert("practiceItems", {
+    const itemId = await ctx.db.insert("practiceItems", {
       userId: c.userId as never,
       kind: args.kind,
       title,
@@ -153,7 +153,7 @@ export const saveItem = mutationGeneric({
       steps: stepsFromPlan(labels),
       createdAt: now,
     } as never);
-    return { ok: true as const, alreadySaved: false as const };
+    return { ok: true as const, alreadySaved: false as const, itemId: String(itemId) };
   },
 });
 
