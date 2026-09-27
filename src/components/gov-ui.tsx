@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useGov } from "../state/governance";
 import { DOCS, type DocId, type Bi, COOKIE_CATEGORIES, PERMISSIONS, type PermissionKey, type AuditStatus } from "../data/governance";
@@ -136,15 +136,31 @@ export function LinkRow({ to, icon, label, sub, badge }: { to: string; icon: str
 export function LegalDoc({ id }: { id: DocId }) {
   const { t, lang } = useStore();
   const doc = DOCS[id];
+  // Day 19 — server registry drives version metadata (version/effective/updated/
+  // published). Falls back to the local DOCS metadata while offline.
+  const legalDocs = useQuery(api.legalWire.listLegalDocuments, {}) as
+    | { ok: boolean; documents: { docId: string; version: string; effectiveDate: string; updatedDate: string; published: string; changeSummary?: string }[] }
+    | undefined;
+  const reg = legalDocs?.ok ? legalDocs.documents.find((d) => d.docId === id) : undefined;
+  const version = reg?.version ?? doc.version;
+  const effective = reg?.effectiveDate ?? doc.effective;
+  const updated = reg?.updatedDate ?? doc.updated;
+  const published = reg?.published ?? "published";
   return (
     <article className="doc">
       <span className="eyebrow">{t("gov.legal")}</span>
       <h1 style={{ fontSize: 26, fontWeight: 800, margin: "6px 0 10px" }}>{doc.title[lang]}</h1>
       <div className="panel" style={{ padding: "12px 14px", marginBottom: 14, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5 }}>
-        <span><span className="faint">{t("gov.version")}: </span><strong>{doc.version}</strong></span>
-        <span><span className="faint">{t("gov.effective")}: </span><strong>{doc.effective}</strong></span>
-        <span><span className="faint">{t("gov.updated")}: </span><strong>{doc.updated}</strong></span>
+        <span><span className="faint">{t("gov.version")}: </span><strong>{version}</strong></span>
+        <span><span className="faint">{t("gov.effective")}: </span><strong>{effective}</strong></span>
+        <span><span className="faint">{t("gov.updated")}: </span><strong>{updated}</strong></span>
+        <span><span className={published === "published" ? "status pass" : "status warning"}>
+          {published === "published" ? `✓ ${t("legal.status.published")}` : published === "draft" ? `✎ ${t("legal.status.draft")}` : `⌛ ${t("legal.status.retired")}`}
+        </span></span>
       </div>
+      {reg?.changeSummary && (
+        <p className="faint" style={{ fontSize: 12, margin: "0 0 12px" }}>{reg.changeSummary}</p>
+      )}
       <div className="legal-note" role="note">
         <strong><IcShield size={14} style={{ verticalAlign: "-2px" }} /> </strong>
         {DOCS[id].intro[lang]}

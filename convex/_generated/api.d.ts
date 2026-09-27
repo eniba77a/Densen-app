@@ -31,6 +31,8 @@ import type * as interactions from "../interactions.js";
 import type * as interactionsWire from "../interactionsWire.js";
 import type * as learning from "../learning.js";
 import type * as learningWire from "../learningWire.js";
+import type * as legal from "../legal.js";
+import type * as legalWire from "../legalWire.js";
 import type * as media from "../media.js";
 import type * as messaging from "../messaging.js";
 import type * as messagingInternals from "../messagingInternals.js";
@@ -90,6 +92,8 @@ declare const fullApi: ApiFromModules<{
   interactionsWire: typeof interactionsWire;
   learning: typeof learning;
   learningWire: typeof learningWire;
+  legal: typeof legal;
+  legalWire: typeof legalWire;
   media: typeof media;
   messaging: typeof messaging;
   messagingInternals: typeof messagingInternals;

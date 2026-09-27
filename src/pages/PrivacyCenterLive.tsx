@@ -11,7 +11,6 @@
  * Accounts, Data, Permissions, Consents, Delete Account.
  */
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Page } from "../components/ui";
 import { useStore } from "../state/store";
 import { useGov } from "../state/governance";
@@ -71,7 +70,6 @@ export default function PrivacyCenterLive() {
   const { t, toast } = useStore();
   const gov = useGov();
   const auth = useAuth();
-  const nav = useNavigate();
   const token = auth.sessionToken!;
 
   const snap = useQuery(api.privacy.getPrivacyCenter, { sessionToken: token }) as Snapshot | { ok: false; error: string } | undefined;
@@ -79,8 +77,23 @@ export default function PrivacyCenterLive() {
   const recordConsent = useMutation(api.privacy.recordConsent);
   const setPermission = useMutation(api.privacy.setDevicePermission);
   const unblock = useMutation(api.privacy.unblockUser);
-  const requestDeletion = useMutation(api.privacy.requestAccountDeletion);
   const updateProfile = useMutation(api.profiles.updateProfile);
+
+  // Day 19 — server-backed deletion flow, marketing prefs and data export.
+  const deletion = useQuery(api.legalWire.getMyDeletionStatus, { sessionToken: token }) as
+    | { ok: boolean; deletion: { status: string; requestedAt: number; eligibleAt: number | null; coolingOffRemainingMs: number | null; completedAt: number | null } | null }
+    | undefined;
+  const marketing = useQuery(api.legalWire.getMyMarketingPrefs, { sessionToken: token }) as
+    | { ok: boolean; prefs: Record<string, boolean>; marketingConsentGranted: boolean; unsubscribeTokenConfigured: boolean }
+    | undefined;
+  const deletionRequest = useMutation(api.legalWire.requestDeletionFlow);
+  const deletionAdvance = useMutation(api.legalWire.advanceDeletionFlow);
+  const marketingConsent = useMutation(api.legalWire.recordMarketingConsent);
+  const marketingPref = useMutation(api.legalWire.setMyMarketingPref);
+  const rotateToken = useMutation(api.legalWire.rotateUnsubscribeToken);
+  const exportData = useQuery(api.legalWire.exportMyData, { sessionToken: token }) as
+    | { ok: boolean; export: { generatedAt: number; formatVersion: number; sections: Record<string, unknown>; manifest: { sections: string[]; excludedFields: { field: string; reason: string }[] } } }
+    | undefined;
 
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -141,18 +154,11 @@ export default function PrivacyCenterLive() {
       /* server record is best-effort; the OS state is authoritative */
     }
   };
-  const doDelete = async () => {
-    if (deleteText.trim().toUpperCase() !== "DELETE") return;
-    setDeleting(true);
-    try {
-      await requestDeletion({ sessionToken: token, confirmText: deleteText });
-      await auth.signOut();
-      nav("/");
-    } catch {
-      toast(t("privacy.live.error"));
-    } finally {
-      setDeleting(false);
-    }
+  const advanceErrorText: Record<string, string> = {
+    cooling_off_active: "legal.deletion.coolingOff",
+    staff_required: "legal.deletion.flowNote",
+    invalid_transition: "legal.deletion.flowNote",
+    no_request: "privacy.live.error",
   };
 
   const ageChip =
@@ -276,23 +282,83 @@ export default function PrivacyCenterLive() {
         </div>
       </Section>
 
-      {/* Data — export the server-backed snapshot (own data, no DOB inside) */}
+      {/* Data — server-built export: own data only, minimized per EXPORT_FIELD_RULES */}
       <Section id="data" title={`📦 ${t("privacy.live.data")}`}>
         <div className="panel" style={{ padding: 16 }}>
           <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>{t("privacy.live.dataSub")}</p>
+          {exportData?.ok ? (
+            <p className="faint" style={{ fontSize: 12, marginBottom: 10 }}>
+              {t("legal.export.sections")}: {exportData.export.manifest.sections.length} · {t("legal.export.format")}: v{exportData.export.formatVersion}
+            </p>
+          ) : null}
           <button
             className="btn btn-primary btn-sm"
+            disabled={!exportData?.ok}
             onClick={() => {
-              const blob = new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" });
+              if (!exportData?.ok) return;
+              const blob = new Blob([JSON.stringify(exportData.export, null, 2)], { type: "application/json" });
               const a = document.createElement("a");
               a.href = URL.createObjectURL(blob);
-              a.download = `densen-privacy-export-${new Date().toISOString().slice(0, 10)}.json`;
+              a.download = `densen-data-export-${new Date().toISOString().slice(0, 10)}.json`;
               a.click();
               URL.revokeObjectURL(a.href);
+              toast(t("legal.export.done"));
             }}
           >
             ⬇ {t("gov.export.btn")}
           </button>
+          {exportData?.ok && exportData.export.manifest.excludedFields.length > 0 && (
+            <p className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
+              {t("legal.export.excluded")}: {exportData.export.manifest.excludedFields.map((f) => f.field).join(", ")}
+            </p>
+          )}
+        </div>
+      </Section>
+
+      {/* Marketing email — opt-in by default, withdrawal = all off + consent row */}
+      <Section id="marketing" title={`✉️ ${t("legal.marketing.title")}`}>
+        <div className="panel" style={{ padding: "8px 16px" }}>
+          <Row
+            label={t("privacy.live.consent.marketing_email")}
+            sub={minor ? locked(t("privacy.live.locked")) : t("legal.marketing.consentSub")}
+          >
+            <Toggle
+              on={marketing?.marketingConsentGranted ?? false}
+              disabled={minor}
+              label={t("privacy.live.consent.marketing_email")}
+              onChange={(v) => {
+                void marketingConsent({ sessionToken: token, granted: v, source: "privacy_center" });
+                toast(t("privacy.live.saved"));
+              }}
+            />
+          </Row>
+          {marketing?.ok && marketing.marketingConsentGranted && (
+            <>
+              {(["productUpdates", "classes", "challenges", "events", "promotions", "teacherUpdates"] as const).map((k) => (
+                <Row key={k} label={t(`legal.marketing.cat.${k}` as never)}>
+                  <Toggle
+                    on={marketing.prefs[k] ?? false}
+                    label={t(`legal.marketing.cat.${k}` as never)}
+                    onChange={(v) => {
+                      void marketingPref({ sessionToken: token, category: k, enabled: v });
+                    }}
+                  />
+                </Row>
+              ))}
+              <Row label={t("legal.marketing.unsubscribeLink")} sub={t("legal.marketing.unsubscribeSub")}>
+                <button
+                  className="btn btn-sm"
+                  disabled={marketing.unsubscribeTokenConfigured}
+                  onClick={() => void rotateToken({ sessionToken: token })}
+                >
+                  {marketing.unsubscribeTokenConfigured ? t("legal.marketing.tokenReady") : t("legal.marketing.generateToken")}
+                </button>
+              </Row>
+            </>
+          )}
+          <Row label={t("legal.marketing.transactional")} sub={t("legal.marketing.transactionalSub")}>
+            <span className="status pass">✓ {t("gov.email.transactional")}</span>
+          </Row>
         </div>
       </Section>
 
@@ -345,15 +411,85 @@ export default function PrivacyCenterLive() {
         )}
       </Section>
 
-      {/* Delete Account — typed confirmation, real server-side erasure request */}
+      {/* Delete Account — REQUESTED → PROCESSING → COMPLETED with cooling-off */}
       <Section id="delete" title={`🗑️ ${t("privacy.live.delete")}`}>
         <div className="panel" style={{ padding: 18, borderColor: "rgba(248,113,113,0.35)" }}>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>{t("privacy.live.deleteSub")}</p>
-          <label className="input-label" htmlFor="del-live-confirm">{t("gov.del.confirmLabel")}</label>
-          <input id="del-live-confirm" className="input" value={deleteText} onChange={(e) => setDeleteText(e.target.value)} placeholder="DELETE" autoComplete="off" />
-          <button className="btn btn-danger" style={{ width: "100%", marginTop: 12 }} disabled={deleting || deleteText.trim().toUpperCase() !== "DELETE"} onClick={() => void doDelete()}>
-            🗑️ {t("privacy.live.deleteBtn")}
-          </button>
+          {deletion?.ok && deletion.deletion ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <span className={`status ${deletion.deletion.status === "completed" ? "pass" : "warning"}`}>
+                  {t(`legal.deletion.status.${deletion.deletion.status}` as never)}
+                </span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  {t("legal.deletion.requestedAt")}: {new Date(deletion.deletion.requestedAt).toLocaleDateString()}
+                </span>
+              </div>
+              {deletion.deletion.status === "processing" && deletion.deletion.coolingOffRemainingMs !== null && (
+                <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>
+                  {t("legal.deletion.coolingOff")}: {Math.ceil(deletion.deletion.coolingOffRemainingMs / 864e5)} {t("legal.deletion.days")}
+                </p>
+              )}
+              {deletion.deletion.status === "completed" ? (
+                <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("legal.deletion.completedNote")}</p>
+              ) : (
+                <>
+                  <p className="muted" style={{ fontSize: 13, margin: "0 0 12px" }}>{t("legal.deletion.flowNote")}</p>
+                  <button
+                    className="btn btn-danger"
+                    style={{ width: "100%" }}
+                    disabled={deleting}
+                    onClick={async () => {
+                      setDeleting(true);
+                      try {
+                        const res = await deletionAdvance({ sessionToken: token });
+                        if (res?.ok) toast(t("legal.deletion.advanced"));
+                        else {
+                          const err = (res as { error?: string })?.error ?? "";
+                          const key = advanceErrorText[err] ?? "privacy.live.error";
+                          toast(t(key as never));
+                        }
+                      } catch {
+                        toast(t("privacy.live.error"));
+                      } finally {
+                        setDeleting(false);
+                      }
+                    }}
+                  >
+                    {deletion.deletion.status === "requested" ? t("legal.deletion.markProcessing") : t("legal.deletion.requestCompletion")}
+                  </button>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>{t("privacy.live.deleteSub")}</p>
+              <label className="input-label" htmlFor="del-live-confirm">{t("gov.del.confirmLabel")}</label>
+              <input id="del-live-confirm" className="input" value={deleteText} onChange={(e) => setDeleteText(e.target.value)} placeholder="DELETE" autoComplete="off" />
+              <button
+                className="btn btn-danger"
+                style={{ width: "100%", marginTop: 12 }}
+                disabled={deleting || deleteText.trim().toUpperCase() !== "DELETE"}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    const res = await deletionRequest({ sessionToken: token, confirmText: deleteText });
+                    if (res?.ok) {
+                      toast(t("legal.deletion.requested"));
+                      setDeleteText("");
+                    } else {
+                      toast(t("privacy.live.error"));
+                    }
+                  } catch {
+                    toast(t("privacy.live.error"));
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+              >
+                🗑️ {t("privacy.live.deleteBtn")}
+              </button>
+            </>
+          )}
         </div>
       </Section>
     </Page>
