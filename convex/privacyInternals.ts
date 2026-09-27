@@ -107,14 +107,22 @@ export function decideConsentRecord(
   return { ok: true };
 }
 
-/** Required legal acceptances captured at signup (versioned, one row each). */
+/**
+ * Required legal acceptances captured at signup — versions resolved through
+ * the Day 19 legal document registry (single source of truth). Import is
+ * lazy-typed: the registry is a pure const with zero Convex dependencies, so
+ * this import stays dependency-free for unit tests.
+ */
+import { consentDocVersion } from "./legal";
+
 export const SIGNUP_CONSENT_VERSIONS: Record<"terms" | "privacy" | "guidelines", string> = {
-  terms: "2.0",
-  privacy: "2.0",
-  guidelines: "1.1",
+  get terms() { return consentDocVersion("terms"); },
+  get privacy() { return consentDocVersion("privacy"); },
+  get guidelines() { return consentDocVersion("guidelines"); },
 };
 
-/** Server-pinned policy version per consent type — the client never picks it. */
+/** Server-pinned policy version per consent type — the client never picks it.
+ *  Day 19: resolves through the legal document registry (single truth). */
 export function consentVersionFor(type: ConsentType): string {
   switch (type) {
     case "terms":
@@ -127,11 +135,11 @@ export function consentVersionFor(type: ConsentType): string {
     case "guidelines":
       return SIGNUP_CONSENT_VERSIONS.guidelines;
     case "cookies":
-      return "1.0";
+      return consentDocVersion("cookies");
     case "purchase_terms":
-      return "1.0";
+      return consentDocVersion("refunds");
     case "music_rights":
-      return "1.0";
+      return consentDocVersion("copyright");
   }
 }
 

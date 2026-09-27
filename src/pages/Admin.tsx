@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { Page, StatCard } from "../components/ui";
 import { StatusPill, tx } from "../components/gov-ui";
@@ -91,6 +91,17 @@ export default function Admin() {
   const [bizDraft, setBizDraft] = useState(gov.business);
   const [unlocked, setUnlocked] = useState(false);
   const setRole = (r: StaffRole) => gov.setStaffRole(r);
+
+  // Day 19 — server-persisted business info (admin-only write via legalWire).
+  // The server singleton is the durable store; the local gov state remains the
+  // prototype fallback for guests.
+  const serverBusiness = useQuery(api.legalWire.getBusinessInfo, {}) as
+    | { ok: boolean; business: Record<string, string>; complete: boolean }
+    | undefined;
+  const setBusinessInfo = useMutation(api.legalWire.setBusinessInfo);
+  useEffect(() => {
+    if (serverBusiness?.ok) setBizDraft((d) => ({ ...d, ...serverBusiness.business }));
+  }, [serverBusiness?.ok, serverBusiness?.business]);
 
   // Role-based gate: sensitive governance tabs require the Compliance Admin role.
   const sensitive: AdminTab[] = ["legal", "safety", "copyright", "claims", "inventory", "requests"];
@@ -408,12 +419,25 @@ export default function Admin() {
                 className="btn btn-primary"
                 onClick={() => {
                   gov.updateBusiness(bizDraft);
-                  toast(t("gov.admin.saved"));
+                  if (auth.sessionToken && auth.viewer?.role === "admin") {
+                    void setBusinessInfo({
+                      adminSessionToken: auth.sessionToken,
+                      patch: {
+                        legalName: bizDraft.legalName || undefined,
+                        companyNumber: bizDraft.registration || undefined,
+                        vatNumber: bizDraft.vat || undefined,
+                        contactEmail: bizDraft.contactEmail || undefined,
+                        supportEmail: bizDraft.supportEmail || undefined,
+                      } as never,
+                    }).then(() => toast(t("gov.admin.saved")));
+                  } else {
+                    toast(t("gov.admin.saved"));
+                  }
                 }}
               >
                 {t("gov.admin.save")}
               </button>
-              <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>{t("gov.biz.unpublished")}</p>
+              <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>{t("legal.business.unpublished")}</p>
             </div>
           )}
 

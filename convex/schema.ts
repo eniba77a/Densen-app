@@ -1313,11 +1313,71 @@ const legalDocuments = defineTable({
   locale: v.string(), // "en" | "sq" | …
   status: v.union(v.literal("draft"), v.literal("active"), v.literal("retired")),
   effectiveAt: v.number(),
+  /** Day 19 — when this registry row was last edited (vs. when it took effect). */
+  updatedAt: v.optional(v.number()),
   contentRef: v.string(), // storage/markdown ref — content not inlined in the row
   createdAt: v.number(),
 })
   .index("by_doc_version", ["docId", "version"])
-  .index("by_doc_status", ["docId", "status"]);
+  .index("by_doc_status", ["docId", "status"]); // Day 19: current-document lookups
+
+/** Day 19 — account deletion requests with the REQUESTED → PROCESSING →
+ *  COMPLETED state machine and a 14-day cooling-off window before erasure.
+ *  One row per user (latest request wins; completed rows stay for the record). */
+const deletionRequests = defineTable({
+  userId: v.id("users"),
+  status: v.union(
+    v.literal("requested"),
+    v.literal("processing"),
+    v.literal("completed")
+  ),
+  requestedAt: v.number(),
+  stateChangedAt: v.number(),
+  /** Erasure eligibility (now + cooling-off) — enforced server-side. */
+  eligibleAt: v.number(),
+  reason: v.optional(v.string()),
+  note: v.optional(v.string()), // operator/system note on the latest state change
+  completedAt: v.optional(v.number()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+})
+  .index("by_user", ["userId"])
+  .index("by_status_eligible", ["status", "eligibleAt"]); // erasure sweep queue
+
+/** Day 19 — marketing email preferences + unsubscribe token (sha-256, the raw
+ *  token is never stored). One row per user (by_user). */
+const marketingPrefs = defineTable({
+  userId: v.id("users"),
+  prefs: v.object({
+    productUpdates: v.boolean(),
+    classes: v.boolean(),
+    challenges: v.boolean(),
+    events: v.boolean(),
+    promotions: v.boolean(),
+    teacherUpdates: v.boolean(),
+  }),
+  unsubscribeTokenHash: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+}).index("by_user", ["userId"]);
+
+/** Day 19 — operator-configured verified business information (all fields
+ *  empty until an operator fills REAL values; nothing is invented in code).
+ *  Singleton row: by_key "business". Rendered on /business and inside legal
+ *  documents' contact sections only when filled. */
+const businessInfo = defineTable({
+  key: v.literal("business"), // singleton
+  legalName: v.optional(v.string()),
+  legalAddress: v.optional(v.string()),
+  companyNumber: v.optional(v.string()),
+  vatNumber: v.optional(v.string()),
+  contactEmail: v.optional(v.string()),
+  supportEmail: v.optional(v.string()),
+  privacyEmail: v.optional(v.string()),
+  updatedBy: v.optional(v.id("users")),
+  updatedAt: v.optional(v.number()),
+  createdAt: v.number(),
+}).index("by_key", ["key"]);
 
 const auditLogs = defineTable({
   actorUserId: v.optional(v.id("users")), // system events may have no actor
@@ -1398,5 +1458,8 @@ export default defineSchema({
   privacySettings,
   devicePermissions,
   legalDocuments,
+  deletionRequests,
+  marketingPrefs,
+  businessInfo,
   auditLogs,
 });

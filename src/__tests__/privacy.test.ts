@@ -4,6 +4,7 @@
  * loosen), consent rules (minor denials, versions), device-permission states.
  */
 import { describe, expect, it } from "vitest";
+import { LEGAL_DOC_REGISTRY } from "../../convex/legal";
 import {
   ageCategoryFromBand,
   consentVersionFor,
@@ -101,11 +102,16 @@ describe("decideConsentRecord", () => {
     expect(decideConsentRecord("shiny_thing", true, "adult")).toEqual({ ok: false, error: "unknown_type" });
   });
 
-  it("pins versions per type (server-side, never client-supplied)", () => {
-    expect(consentVersionFor("terms")).toBe("2.0");
-    expect(consentVersionFor("guidelines")).toBe("1.1");
-    expect(consentVersionFor("privacy")).toBe("2.0");
-    expect(consentVersionFor("marketing_email")).toBe("2.0");
+  it("pins versions per type (server-side, resolved through the Day 19 legal registry)", () => {
+    // Day 19 — versions resolve through LEGAL_DOC_REGISTRY; the property that
+    // matters is registry-consistency, not a hardcoded string.
+    expect(consentVersionFor("terms")).toBe(LEGAL_DOC_REGISTRY.terms.version);
+    expect(consentVersionFor("guidelines")).toBe(LEGAL_DOC_REGISTRY.community.version);
+    expect(consentVersionFor("privacy")).toBe(LEGAL_DOC_REGISTRY.privacy.version);
+    expect(consentVersionFor("marketing_email")).toBe(LEGAL_DOC_REGISTRY.privacy.version);
+    expect(consentVersionFor("cookies")).toBe(LEGAL_DOC_REGISTRY.cookies.version);
+    expect(consentVersionFor("purchase_terms")).toBe(LEGAL_DOC_REGISTRY.refunds.version);
+    expect(consentVersionFor("music_rights")).toBe(LEGAL_DOC_REGISTRY.copyright.version);
   });
 });
 
