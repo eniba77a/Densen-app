@@ -139,6 +139,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
+  // Day 20 a11y: keep <html lang> in lockstep with the EN/SQ toggle so screen
+  // readers switch pronunciation with the UI language (WCAG 3.1.1).
+  useEffect(() => {
+    document.documentElement.lang = state.lang;
+  }, [state.lang]);
+
   const toast = useCallback((text: string) => {
     const id = Date.now() + Math.random();
     setToasts((ts) => [...ts, { id, text }]);

@@ -188,11 +188,14 @@ async function collectStyleEntities(db: any): Promise<SearchEntity[]> {
   }));
 }
 
-/** Hashtag rows — aggregated from PUBLIC posts only (never private/followers). */
+/** Hashtag rows — aggregated from PUBLIC + PUBLISHED posts only (never
+ *  private/followers, never held-for-review). Day 20 audit: an in_review post
+ *  must not leak even its hashtag aggregate into discovery. */
 async function collectHashtagEntities(db: any): Promise<SearchEntity[]> {
   const counts = new Map<string, { uses: number; first: number }>();
   for (const p of (await db.query("posts").collect()) as any[]) {
     if (p.visibility !== "public") continue;
+    if (p.status !== "published") continue;
     for (const tag of p.hashtags ?? []) {
       const t = String(tag).replace(/^#+/, "").trim().toLowerCase();
       if (!t || t.length > 40) continue;
