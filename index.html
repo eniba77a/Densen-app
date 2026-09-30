@@ -2,9 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Brand: official DENSEN ACADEMY mark. The SVG gold-D is the instant
+         fallback; BrandLogo.tsx swaps in public/brand/logo-icon.png the moment
+         the artwork is dropped into public/brand/. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230b0d10'/%3E%3Ctext x='50' y='68' font-size='54' font-family='Arial Black' font-weight='900' fill='%23e3b341' text-anchor='middle'%3ED%3C/text%3E%3C/svg%3E" />
+    <link rel="apple-touch-icon" href="/brand/logo-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0d10" />
+    <meta property="og:title" content="DENSEN Academy — Learn. Create. Share. Connect." />
+    <meta property="og:description" content="Learn dance, create, share and connect. The social platform built for dancers." />
+    <meta property="og:image" content="/brand/logo-icon.png" />
+    <meta name="twitter:card" content="summary_large_image" />
     <!--
       Content-Security-Policy (defense-in-depth for the static SPA).
       The backend lives on the Convex deployment; nothing here reads secrets.

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ME, useStore, users as storeUsers } from "../state/store";
+import { BrandLogo } from "./BrandLogo";
 
 /* ---------------- Avatar ---------------- */
 export function Avatar({ src, size = 40, ring }: { src: string; size?: number; ring?: boolean }) {
@@ -23,30 +24,12 @@ export function Avatar({ src, size = 40, ring }: { src: string; size?: number; r
   );
 }
 
-/* ---------------- Logo ---------------- */
+/* ---------------- Logo (official brandmark — see BrandLogo.tsx) ----------------
+ * Thin wrapper so every existing call site keeps working. Renders the official
+ * DENSEN ACADEMY artwork when public/brand/logo.png is present; otherwise the
+ * gold wordmark fallback (same shape, same sizing). */
 export function Logo({ size = 26 }: { size?: number }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 2, lineHeight: 1 }}>
-      <span
-        className="gold-grad-text"
-        style={{ fontFamily: "Sora", fontWeight: 800, fontSize: size, letterSpacing: "0.02em" }}
-      >
-        DENSEN
-      </span>
-      <span
-        style={{
-          fontFamily: "Sora",
-          fontWeight: 700,
-          fontSize: size * 0.44,
-          color: "var(--ink-dim)",
-          letterSpacing: "0.22em",
-          textTransform: "uppercase",
-        }}
-      >
-        Academy
-      </span>
-    </span>
-  );
+  return <BrandLogo size={size} />;
 }
 
 /* ---------------- Section header ---------------- */
