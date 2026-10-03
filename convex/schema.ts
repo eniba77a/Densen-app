@@ -1397,6 +1397,47 @@ const auditLogs = defineTable({
   .index("by_event", ["eventType", "createdAt"])
   .index("by_actor", ["actorUserId", "createdAt"]);
 
+/** Day 21 — Densen Help assistant thread (Messages → Densen Help 🤖). Flat
+ *  per-user transcript, separate from normal conversations. Assistant rows
+ *  record how the answer was produced (answeredBy) and any detector flags;
+ *  rows are private to the user (staff read summaries via audit, not bodies). */
+const helpMessages = defineTable({
+  userId: v.id("users"),
+  role: v.union(v.literal("user"), v.literal("assistant")),
+  text: v.string(),
+  answeredBy: v.optional(
+    v.union(v.literal("faq"), v.literal("ai"), v.literal("safety"), v.literal("config")),
+  ),
+  flags: v.optional(v.array(v.string())), // detector reasons, e.g. injection/out_of_scope
+  lang: v.optional(v.union(v.literal("en"), v.literal("sq"))),
+  createdAt: v.number(),
+})
+  .index("by_user_time", ["userId", "createdAt"]);
+
+/** Day 21 — admin-editable Densen Help configuration (spec §21). Singleton row
+ *  by_key "help"; absent row ⇒ code falls back to DEFAULT_HELP_CONFIG. */
+const helpAssistantConfig = defineTable({
+  key: v.literal("help"), // singleton
+  enabled: v.boolean(),
+  welcomeMessage: v.optional(v.object({ en: v.string(), sq: v.string() })),
+  maxMessageLength: v.number(),
+  rateLimitPerDay: v.number(),
+  rateLimitPerHour: v.number(),
+  model: v.optional(v.string()),
+  faqVersion: v.number(),
+  updatedBy: v.optional(v.id("users")),
+  updatedAt: v.optional(v.number()),
+  createdAt: v.number(),
+}).index("by_key", ["key"]);
+
+/** Day 21 — one row per accepted Densen Help request; per-user day/hour window
+ *  counting (mirrors the interactions.ts rate-limit pattern). */
+const helpRateEvents = defineTable({
+  userId: v.id("users"),
+  createdAt: v.number(),
+})
+  .index("by_user_time", ["userId", "createdAt"]);
+
 export default defineSchema({
   users,
   profiles,
@@ -1461,5 +1502,8 @@ export default defineSchema({
   deletionRequests,
   marketingPrefs,
   businessInfo,
+  helpMessages,
+  helpAssistantConfig,
+  helpRateEvents,
   auditLogs,
 });
