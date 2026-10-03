@@ -204,7 +204,10 @@ export const listMyConversations = queryGeneric({
 
 /** One thread with messages + my read state (membership enforced). */
 export const getConversation = queryGeneric({
-  args: { sessionToken: v.string(), conversationId: v.string() },
+  // Day 22 chat-memory rule (spec §9): the thread loads as a bounded recent
+  // window (latest 50). `before` is an optional createdAt cursor — the client
+  // passes it only when the reader explicitly asks for older history.
+  args: { sessionToken: v.string(), conversationId: v.string(), before: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const caller = await requireCaller(ctx.db, args.sessionToken);
     if (!caller) return { ok: false as const, error: "unauthenticated" as const };
@@ -216,11 +219,23 @@ export const getConversation = queryGeneric({
     }
     const otherId = (convo.memberUserIds as string[]).find((m) => String(m) !== String(caller.userId))!;
 
-    const messages = (await ctx.db
+    const PAGE = 50;
+    let rows = (await ctx.db
       .query("messages")
       .withIndex("by_conversation_time", (q: any) => q.eq("conversationId", convo._id))
-      .order("asc")
-      .take(300)) as any[];
+      .order("desc")
+      .take(PAGE + 1)) as any[];
+    if (args.before !== undefined) {
+      rows = (await ctx.db
+        .query("messages")
+        .withIndex("by_conversation_time", (q: any) => q.eq("conversationId", convo._id))
+        .order("desc")
+        .filter((q: any) => q.lt(q.field("createdAt"), args.before))
+        .take(PAGE + 1)) as any[];
+    }
+    const hasMore = rows.length > PAGE;
+    if (hasMore) rows = rows.slice(0, PAGE);
+    const messages = rows.slice().reverse(); // ascending for the UI
 
     const readRow = (await ctx.db
       .query("conversationReads")
@@ -235,6 +250,7 @@ export const getConversation = queryGeneric({
 
     return {
       ok: true as const,
+      hasMore,
       conversation: {
         id: convo._id as string,
         otherUserId: otherId,

@@ -1,10 +1,13 @@
 // Central registry of verified placeholder media (all URLs checked HTTP 200/206).
-const img = (id: string, w = 900, q = 78) =>
+// Day 22: defaults sized for where they actually render (cards ≤ 400px wide,
+// avatars ≤ 96px) — never a 2000px image for a 400px slot. `auto=format`
+// still serves WebP/AVIF to browsers that support it.
+const img = (id: string, w = 640, q = 75) =>
   `https://images.unsplash.com/photo-${id}?w=${w}&q=${q}&auto=format&fit=crop`;
 
 export const IMG = {
-  hero: img("1547153760-18fc86324498", 1600),
-  heroAlt: img("1524594152303-9fd13543fe6e", 1600),
+  hero: img("1547153760-18fc86324498", 1280),
+  heroAlt: img("1524594152303-9fd13543fe6e", 1280),
   catHipHop: img("1535525153412-5a42439a210d"),
   catCommercial: img("1508807526345-15e9b5f4eaff"),
   catContemporary: img("1518609878373-06d740f60d8b"),
@@ -56,7 +59,8 @@ export const VID = {
   landscapeC: V("4114797", "hd_1280_720_25fps"), // landscape dance clip
 } as const;
 
-const av = (id: string) => `https://i.pravatar.cc/300?u=densen-${id}`;
+// Avatars render at 34–48px; 2x DPR headroom = 144px, not 300px.
+const av = (id: string) => `https://i.pravatar.cc/144?u=densen-${id}`;
 
 export const AVATARS = {
   me: av("me"),

@@ -174,6 +174,48 @@ export default function Learn() {
         </div>
       </section>
 
+      {/* Arcade Mode — a feature inside Learn, not a permanent tab (Day 22) */}
+      <button
+        onClick={() => nav("/arcade")}
+        className="panel panel-hover"
+        style={{
+          display: "flex",
+          width: "100%",
+          alignItems: "center",
+          gap: 14,
+          textAlign: "left",
+          padding: "14px 16px",
+          marginBottom: 24,
+          cursor: "pointer",
+          color: "inherit",
+          borderColor: "var(--gold-line)",
+          background: "linear-gradient(120deg, rgba(227,179,65,0.10), transparent 55%), var(--panel)",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 13,
+            background: "linear-gradient(135deg, #f0c75e, var(--gold) 55%, var(--gold-deep))",
+            color: "var(--gold-ink)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 21,
+            flexShrink: 0,
+          }}
+        >
+          🕹
+        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontWeight: 800, fontSize: 15 }}>{t("arcade.title")}</span>
+          <span className="muted" style={{ display: "block", fontSize: 12.5, marginTop: 2 }}>{t("arcade.subtitle")}</span>
+        </span>
+        <span className="chip active" style={{ flexShrink: 0 }}>{t("nav.arcade")} →</span>
+      </button>
+
       <input
         className="input"
         placeholder={t("learn.searchCourses")}

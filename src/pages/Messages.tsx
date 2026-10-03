@@ -335,6 +335,60 @@ export function ChatPage() {
   const convo = data && typeof data === "object" && "ok" in data && data.ok ? (data.conversation as ServerConvo & { otherIsMinor: boolean }) : null;
   const serverMsgs: ServerMsg[] = data && typeof data === "object" && "ok" in data && data.ok ? (data.messages as ServerMsg[]) : [];
 
+  // Day 22 chat memory (spec §9): the latest 50 arrive reactively; older
+  // history is fetched page-by-page, only when the reader asks for it —
+  // never the whole thread at once.
+  const mainHasMore =
+    data && typeof data === "object" && "ok" in data && data.ok
+      ? (data as { hasMore?: boolean }).hasMore === true
+      : false;
+  const [olderMsgs, setOlderMsgs] = useState<ServerMsg[]>([]);
+  const [fetchCursor, setFetchCursor] = useState<number | null>(null);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [exhausted, setExhausted] = useState(false);
+  const consumedCursorRef = useRef<number | null>(null);
+
+  // Fresh thread → fresh history window.
+  useEffect(() => {
+    setOlderMsgs([]);
+    setFetchCursor(null);
+    setNextCursor(null);
+    setExhausted(false);
+    consumedCursorRef.current = null;
+  }, [convId]);
+
+  const olderData = useQuery(
+    api.messagingWire.getConversation,
+    sessionToken && convId && fetchCursor !== null ? { sessionToken, conversationId: convId, before: fetchCursor } : "skip"
+  );
+
+  // Consume exactly one older page per explicit request, then park the
+  // cursor ("skip") so the reactive query never auto-fetches more pages.
+  useEffect(() => {
+    if (!olderData || typeof olderData !== "object" || !("ok" in olderData) || !olderData.ok) return;
+    if (fetchCursor === null || consumedCursorRef.current === fetchCursor) return;
+    consumedCursorRef.current = fetchCursor;
+    const page = (olderData as { messages: ServerMsg[] }).messages;
+    const more = (olderData as { hasMore?: boolean }).hasMore === true;
+    if (page.length > 0) {
+      setOlderMsgs((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        return [...page.filter((m) => !known.has(m.id)), ...prev];
+      });
+      setNextCursor(more ? Math.min(...page.map((m) => m.createdAt)) : null);
+    }
+    if (!more) setExhausted(true);
+    setFetchCursor(null);
+  }, [olderData, fetchCursor]);
+
+  const loadingEarlier = fetchCursor !== null;
+  const canLoadEarlier = !loadingEarlier && !exhausted && (olderMsgs.length > 0 ? nextCursor !== null : mainHasMore);
+  const loadEarlier = () => {
+    const all = [...olderMsgs, ...serverMsgs];
+    if (all.length === 0) return;
+    setFetchCursor(Math.min(...all.map((m) => m.createdAt)));
+  };
+
   // Server read cursor on open + when new messages arrive.
   useEffect(() => {
     if (sessionToken && convId && convo && serverMsgs.length > 0) {
@@ -350,9 +404,11 @@ export function ChatPage() {
   const [pendingShare, setPendingShare] = useState<{ ref: string; kind: string; title: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const allServerMsgs = useMemo(() => [...olderMsgs, ...serverMsgs], [olderMsgs, serverMsgs]);
+
   const msgs: ChatMessage[] = useMemo(() => {
     if (convo) {
-      return serverMsgs.map((m) => ({
+      return allServerMsgs.map((m) => ({
         id: m.id,
         from: (m.mine ? "me" : m.senderId) as string,
         text: m.body,
@@ -368,7 +424,7 @@ export function ChatPage() {
     }
     if (!cv) return [];
     return cv.messages;
-  }, [convo, serverMsgs, cv, lang, t]);
+  }, [convo, allServerMsgs, cv, lang, t]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -450,6 +506,16 @@ export function ChatPage() {
 
       {/* messages */}
       <div style={{ flex: 1, overflowY: "auto", padding: "18px 16px", display: "flex", flexDirection: "column", gap: 10, maxWidth: 860, width: "100%", margin: "0 auto" }}>
+        {(canLoadEarlier || loadingEarlier) && (
+          <button
+            className="btn btn-sm"
+            style={{ alignSelf: "center", flexShrink: 0, opacity: loadingEarlier ? 0.55 : 1 }}
+            onClick={loadEarlier}
+            disabled={loadingEarlier}
+          >
+            ↑ {t("messages.loadEarlier")}
+          </button>
+        )}
         {msgs.map((m) => {
           const mine = m.from === "me";
           return (

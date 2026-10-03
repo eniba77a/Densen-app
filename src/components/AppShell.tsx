@@ -8,21 +8,17 @@ import { useAuth } from "../state/auth";
 import { Avatar, Logo, ToastHost } from "./ui";
 import {
   IcBell,
-  IcCalendar,
   IcCompass,
   IcFlame,
-  IcPractice,
   IcHome,
   IcLearn,
   IcMessage,
-  IcPlay,
   IcPlus,
   IcSearch,
   IcSettings,
   IcShield,
   IcTrophy,
   IcUser,
-  IcUsers,
 } from "./icons";
 import type { TKey } from "../i18n";
 
@@ -165,17 +161,24 @@ const RedDot = () => (
 );
 
 /* ---------------- desktop sidebar ---------------- */
+/**
+ * Day 22 simplification: the main navigation is the same five sections on
+ * mobile and desktop (Home · Learn · Create · Messages · Profile). Everything
+ * else stays reachable one level inside those sections — Arcade lives in
+ * Learn, credits in Profile/Account, challenges & events from Home quick
+ * actions — instead of being permanent top-level destinations.
+ */
 const SIDE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) => JSX.Element; key: TKey }[] = [
   { to: "/", icon: IcHome, key: "nav.home" },
-  { to: "/discover", icon: IcCompass, key: "nav.discover" },
   { to: "/learn", icon: IcLearn, key: "nav.learn" },
-  { to: "/challenges", icon: IcTrophy, key: "nav.challenges" },
-  { to: "/events", icon: IcCalendar, key: "nav.events" },
-  { to: "/teams", icon: IcUsers, key: "nav.teams" },
-  { to: "/progress", icon: IcFlame, key: "nav.progress" },
-  { to: "/practice", icon: IcPractice, key: "nav.practice" },
-  { to: "/arcade", icon: IcTrophy, key: "nav.arcade" },
+  { to: "/messages", icon: IcMessage, key: "nav.messages" },
   { to: "/profile", icon: IcUser, key: "nav.profile" },
+];
+
+const SIDE_MORE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) => JSX.Element; key: TKey }[] = [
+  { to: "/discover", icon: IcCompass, key: "nav.discover" },
+  { to: "/arcade", icon: IcTrophy, key: "nav.arcade" },
+  { to: "/progress", icon: IcFlame, key: "nav.progress" },
   { to: "/studio", icon: IcLearn, key: "studio.title" },
 ];
 
@@ -205,17 +208,32 @@ function Sidebar() {
       {SIDE_LINKS.map(({ to, icon: Icon, key }) => (
         <SideLink key={to} to={to} icon={<Icon size={21} />} label={t(key)} />
       ))}
+      <button
+        onClick={() => nav("/create")}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          margin: "4px 0 10px",
+          padding: "10px 12px",
+          borderRadius: 13,
+          border: "none",
+          background: "linear-gradient(135deg, #f0c75e, var(--gold) 55%, var(--gold-deep))",
+          color: "var(--gold-ink)",
+          fontWeight: 800,
+          fontSize: 14,
+          cursor: "pointer",
+        }}
+      >
+        <IcPlus size={18} /> {t("nav.create")}
+      </button>
+      {SIDE_MORE_LINKS.map(({ to, icon: Icon, key }) => (
+        <SideLink key={to} to={to} icon={<Icon size={21} />} label={t(key)} />
+      ))}
       <div style={{ flex: 1 }} />
       <SideLink to="/moderation" icon={<IcShield size={21} />} label={t("mod.title")} />
       <SideLink to="/admin" icon={<IcShield size={21} />} label={t("nav.admin")} />
       <SideLink to="/settings" icon={<IcSettings size={21} />} label={t("nav.settings")} />
-      <button
-        className="btn btn-primary"
-        style={{ marginTop: 10, width: "100%" }}
-        onClick={() => nav("/create")}
-      >
-        <IcPlus size={18} /> {t("nav.create")}
-      </button>
     </aside>
   );
 }
@@ -246,6 +264,11 @@ function SideLink({ to, icon, label }: { to: string; icon: React.ReactNode; labe
 }
 
 /* ---------------- mobile bottom nav ---------------- */
+/**
+ * Day 22 — exactly five primary destinations (spec: Home · Learn · Create ·
+ * Messages · Profile). Arcade, credits, search, notifications, settings and
+ * purchases live inside their sections; nothing was removed from the app.
+ */
 function BottomNav() {
   const t = useTKey();
   const nav = useNavigate();
@@ -256,23 +279,28 @@ function BottomNav() {
       <button
         key={to}
         onClick={() => nav(to)}
+        aria-label={label}
+        aria-current={active ? "page" : undefined}
         style={{
           flex: center ? "0 0 auto" : 1,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          justifyContent: "center",
           gap: 3,
           background: "none",
           border: "none",
           color: active ? "var(--gold)" : "var(--ink-faint)",
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: 700,
           cursor: "pointer",
-          padding: 0,
+          padding: "6px 0 4px",
+          minHeight: 52,
         }}
       >
         {center ? (
           <span
+            aria-hidden="true"
             style={{
               width: 52,
               height: 52,
@@ -290,7 +318,7 @@ function BottomNav() {
             {icon}
           </span>
         ) : (
-          icon
+          <span aria-hidden="true" style={{ display: "flex" }}>{icon}</span>
         )}
         <span>{label}</span>
       </button>
@@ -300,6 +328,7 @@ function BottomNav() {
   return (
     <nav
       className="hide-desktop"
+      aria-label={t("nav.home")}
       style={{
         position: "fixed",
         bottom: 0,
@@ -315,9 +344,9 @@ function BottomNav() {
       }}
     >
       {item("/", <IcHome size={22} />, t("nav.home"))}
-      {item("/feed", <IcPlay size={22} />, "Feed")}
+      {item("/learn", <IcLearn size={22} />, t("nav.learn"))}
       {item("/create", <IcPlus size={26} />, t("nav.create"), true)}
-      {item("/discover", <IcCompass size={22} />, t("nav.discover"))}
+      {item("/messages", <IcMessage size={22} />, t("nav.messages"))}
       {item("/profile", <IcUser size={22} />, t("nav.profile"))}
     </nav>
   );
