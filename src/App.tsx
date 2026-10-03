@@ -17,7 +17,7 @@ import Practice from "./pages/Practice";
 import Arcade from "./pages/Arcade";
 import { ChallengesPage, ChallengeDetail } from "./pages/Challenges";
 import { EventsPage, LivePage, LeaderboardsPage } from "./pages/EventsLive";
-import { MessagesPage, ChatPage, NewChatPage, ComposeToUserPage, NotificationsRoute } from "./pages/Messages";
+import { MessagesPage, ChatPage, NewChatPage, ComposeToUserPage, NotificationsRoute, HelpChatPage } from "./pages/Messages";
 import PrivacyCenterLive from "./pages/PrivacyCenterLive";
 import ModerationCenter from "./pages/ModerationCenter";
 import { useAuth } from "./state/auth";
@@ -100,6 +100,7 @@ function Shell() {
         <Route path="/live" element={<LivePage />} />
         <Route path="/leaderboards" element={<LeaderboardsPage />} />
         <Route path="/messages" element={<MessagesPage />} />
+        <Route path="/messages/help" element={<HelpChatPage />} />
         <Route path="/messages/new" element={<NewChatPage />} />
         <Route path="/messages/to/:userId" element={<ComposeToUserPage />} />
         <Route path="/messages/:convId" element={<ChatPage />} />

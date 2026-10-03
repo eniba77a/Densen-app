@@ -127,6 +127,45 @@ export function MessagesPage() {
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Densen Help — the assistant lives INSIDE Messages (Day 21). */}
+          <button
+            onClick={() => nav("/messages/help")}
+            className="panel panel-hover"
+            style={{
+              display: "flex",
+              gap: 13,
+              padding: 13,
+              alignItems: "center",
+              cursor: "pointer",
+              textAlign: "left",
+              color: "inherit",
+              width: "100%",
+              borderColor: "var(--gold-line)",
+            }}
+          >
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 999,
+                background: "linear-gradient(135deg, #f0c75e, var(--gold))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 24,
+                flexShrink: 0,
+              }}
+            >
+              🤖
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14.5 }}>{t("help.title")}</div>
+              <div className="muted" style={{ fontSize: 13, marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {t("help.preview")}
+              </div>
+            </div>
+            <span className="chip active" style={{ fontSize: 12 }}>AI</span>
+          </button>
           {serverConvos.map((c) => (
             <button
               key={c.id}
@@ -509,6 +548,191 @@ export function ChatPage() {
       </div>
 
       {reportOpen && <ReportModal open onClose={() => setReportOpen(false)} targetType="message" targetId={convo.id} targetLabel={title} />}
+    </div>
+  );
+}
+
+/* ---------------- Densen Help assistant (Day 21) ---------------- */
+
+/** Projection of helpWire.getHelpConversation rows. */
+interface HelpMsg {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  answeredBy?: string;
+  flags: string[];
+  createdAt: number;
+}
+
+/** Client mirror of the help wire error vocabulary (server authoritative). */
+const HELP_ERROR_KEYS: Record<string, string> = {
+  rate_limited: "help.errRateLimited",
+  assistant_not_configured: "help.errNotConfigured",
+  assistant_disabled: "help.errDisabled",
+  unauthenticated: "messages.needAccount",
+};
+
+/**
+ * Messages → Densen Help 🤖. The assistant thread: server-configurable welcome,
+ * deterministic FAQ answers, honest error mapping, and a "Thinking…" state
+ * while the scheduled AI action lands its validated reply.
+ */
+export function HelpChatPage() {
+  const nav = useNavigate();
+  const { t, lang } = useStore();
+  const { sessionToken } = useAuth();
+  const ask = useMutation(api.helpWire.askHelp);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const cfg = useQuery(api.helpWire.helpConfig, sessionToken ? { sessionToken, lang } : "skip");
+  const data = useQuery(api.helpWire.getHelpConversation, sessionToken ? { sessionToken } : "skip");
+
+  const cfgOk = Boolean(cfg && typeof cfg === "object" && "ok" in cfg && cfg.ok);
+  const enabled = cfgOk ? Boolean((cfg as { enabled: boolean }).enabled) : true;
+  const welcome = cfgOk ? ((cfg as { welcome?: string }).welcome ?? "") : "";
+  const maxLen = cfgOk ? ((cfg as { maxMessageLength?: number }).maxMessageLength ?? 1500) : 1500;
+  const msgs: HelpMsg[] =
+    data && typeof data === "object" && "ok" in data && data.ok ? (data.messages as HelpMsg[]) : [];
+  // Waiting = the last row is the user's question and no assistant reply yet.
+  const waiting = msgs.length > 0 && msgs[msgs.length - 1].role === "user";
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs.length, waiting]);
+
+  if (!sessionToken) {
+    return (
+      <Page>
+        <Empty icon="🔐" text={t("messages.needAccount")} />
+      </Page>
+    );
+  }
+
+  const send = (preset?: string) => {
+    const body = (preset ?? text).trim();
+    if (!body || !sessionToken || waiting) return;
+    setError(null);
+    void ask({ sessionToken, text: body, lang })
+      .then((res) => {
+        if (res && typeof res === "object" && "ok" in res && res.ok) {
+          setText("");
+        } else if (res && typeof res === "object" && "error" in res) {
+          setError(t((HELP_ERROR_KEYS[res.error as string] ?? "help.errGeneric") as never));
+        }
+      })
+      .catch(() => setError(t("help.errGeneric")));
+  };
+
+  if (!enabled) {
+    return (
+      <Page>
+        <button onClick={() => nav("/messages")} className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}>
+          ← {t("common.back")}
+        </button>
+        <Empty icon="🤖" text={t("help.errDisabled")} />
+      </Page>
+    );
+  }
+
+  return (
+    <div className="anim-fade" style={{ display: "flex", flexDirection: "column", height: "100dvh" }}>
+      {/* header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid var(--line)", background: "var(--bg-soft)" }}>
+        <button onClick={() => nav("/messages")} className="btn btn-icon btn-ghost btn-sm">←</button>
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 999,
+            background: "linear-gradient(135deg, #f0c75e, var(--gold))",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 20,
+            flexShrink: 0,
+          }}
+        >
+          🤖
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{t("help.title")}</div>
+          <div className="faint" style={{ fontSize: 12 }}>{t("help.subtitle")}</div>
+        </div>
+        <span className="chip active" style={{ fontSize: 11 }}>AI</span>
+      </div>
+
+      {error && (
+        <div style={{ padding: "10px 16px", background: "var(--gold-soft)", borderBottom: "1px solid var(--gold-line)" }} role="alert">
+          <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>🛡 {error}</p>
+        </div>
+      )}
+
+      {/* thread */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "18px 16px", display: "flex", flexDirection: "column", gap: 10, maxWidth: 860, width: "100%", margin: "0 auto" }}>
+        {welcome && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{ maxWidth: "85%", background: "var(--panel-2)", color: "var(--ink)", borderRadius: 18, borderBottomLeftRadius: 6, padding: "10px 14px" }}>
+              <div style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{welcome}</div>
+            </div>
+          </div>
+        )}
+        {msgs.length === 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+            {(["help.start1", "help.start2", "help.start3", "help.start4", "help.start5"] as const).map((k) => (
+              <button key={k} className="chip" onClick={() => send(t(k))}>
+                {t(k)}
+              </button>
+            ))}
+          </div>
+        )}
+        {msgs.map((m) => {
+          const mine = m.role === "user";
+          return (
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+              <div
+                style={{
+                  maxWidth: "78%",
+                  background: mine ? "linear-gradient(135deg, #f0c75e, var(--gold))" : "var(--panel-2)",
+                  color: mine ? "#171204" : "var(--ink)",
+                  borderRadius: 18,
+                  padding: "10px 14px",
+                  borderBottomRightRadius: mine ? 6 : 18,
+                  borderBottomLeftRadius: mine ? 18 : 6,
+                }}
+              >
+                <div style={{ fontSize: 14, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{m.text}</div>
+                <div style={{ fontSize: 10.5, opacity: 0.65, marginTop: 4, textAlign: "right" }}>{relTime(m.createdAt, lang)}</div>
+              </div>
+            </div>
+          );
+        })}
+        {waiting && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{ background: "var(--panel-2)", color: "var(--ink)", borderRadius: 18, borderBottomLeftRadius: 6, padding: "10px 14px" }}>
+              <div className="faint" style={{ fontSize: 13 }}>{t("help.thinking")}</div>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* composer */}
+      <div style={{ padding: "10px 16px calc(12px + var(--sab))", borderTop: "1px solid var(--line)", background: "var(--bg-soft)", display: "flex", gap: 10, maxWidth: 892, width: "100%", margin: "0 auto", alignItems: "center" }}>
+        <input
+          className="input"
+          placeholder={t("help.placeholder")}
+          value={text}
+          maxLength={maxLen}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          aria-label={t("help.title")}
+        />
+        <button className="btn btn-primary btn-icon" onClick={() => send()} aria-label={t("messages.send")} disabled={!text.trim() || waiting}>
+          <IcSend size={18} />
+        </button>
+      </div>
     </div>
   );
 }
