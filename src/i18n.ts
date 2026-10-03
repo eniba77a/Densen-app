@@ -408,6 +408,7 @@ const en = {
   "messages.errShare": "That content can't be shared.",
   "messages.errChallengeClosed": "That challenge isn't open for invitations.",
   "messages.errGeneric": "Message not sent.",
+  "messages.loadEarlier": "Load earlier messages",
 
   /* ---------------- Densen Help assistant (Day 21) ---------------- */
   "help.title": "Densen Help",
@@ -1655,6 +1656,7 @@ const sq: Record<TKey, string> = {
   "messages.errShare": "Ajo p\u00ebrmbajtje nuk mund t\u00eb ndahet.",
   "messages.errChallengeClosed": "Ajo sfid\u00eb nuk \u00ebsht\u00eb e hapur p\u00ebr ftesa.",
   "messages.errGeneric": "Mesazhi nuk u d\u00ebrgua.",
+  "messages.loadEarlier": "Ngarko mesazhet e mëparshme",
 
   /* ---------------- Densen Help assistant (Day 21) ---------------- */
   "help.title": "Densen Help",

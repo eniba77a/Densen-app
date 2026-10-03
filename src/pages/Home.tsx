@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bar } from "../components/ui";
 import { IcFlame, IcPlay, IcSparkles } from "../components/icons";
@@ -91,20 +92,50 @@ function Rail({ titleKey, ids, action }: { titleKey: TKey; ids: string[]; action
 export default function Home() {
   const { t, courseProgress, completed } = useStore();
   const nav = useNavigate();
+  const heroVidRef = useRef<HTMLVideoElement>(null);
 
   const featured = courses.filter((c) => c.featured).map((c) => c.id);
-  const popular = courses.filter((c) => c.popular).map((c) => c.id);
-  const fresh = courses.filter((c) => c.isNew).map((c) => c.id);
   const inProgress = courses.filter((c) => courseProgress(c.id) > 0 && courseProgress(c.id) < 100);
+
+  // Day 22 memory/CPU rule: the decorative hero clip decodes only while it is
+  // actually on screen and the tab is visible — and never for users with
+  // prefers-reduced-motion, who get the still poster instead.
+  useEffect(() => {
+    const v = heroVidRef.current;
+    if (!v) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return;
+    let onScreen = true;
+    const apply = () => {
+      if (onScreen && !document.hidden) {
+        v.play().catch(() => undefined);
+      } else {
+        v.pause();
+      }
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        onScreen = entries[0]?.isIntersecting ?? true;
+        apply();
+      },
+      { threshold: 0.15 }
+    );
+    io.observe(v);
+    document.addEventListener("visibilitychange", apply);
+    return () => {
+      io.disconnect();
+      document.removeEventListener("visibilitychange", apply);
+      v.pause();
+    };
+  }, []);
 
   return (
     <div className="anim-fade" style={{ paddingBottom: 110 }}>
       {/* hero */}
       <section style={{ position: "relative", minHeight: "72vh", display: "flex", alignItems: "flex-end", overflow: "hidden" }}>
         <video
+          ref={heroVidRef}
           src={VID.landscapeB}
           poster={IMG.hero}
-          autoPlay
           muted
           loop
           playsInline
@@ -135,9 +166,9 @@ export default function Home() {
       </section>
 
       <div style={{ maxWidth: 1160, margin: "0 auto", padding: "26px 20px 0" }}>
-        {/* quick links */}
+        {/* quick actions — the secondary destinations, one level inside Home */}
         <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 30 }}>
-          {["feed", "challenges", "events", "live", "leaderboards", "teams", "audio", "progress", "messages", "admin"].map((r) => (
+          {["feed", "arcade", "challenges", "events", "leaderboards", "teams", "practice", "audio", "live", "progress"].map((r) => (
             <button key={r} className="chip" onClick={() => nav(`/${r}`)}>
               {t(`nav.${r}` as never)}
             </button>
@@ -198,8 +229,6 @@ export default function Home() {
         )}
 
         <Rail titleKey="home.featured" ids={featured} action={t("home.viewAll")} />
-        <Rail titleKey="home.popular" ids={popular} action={t("home.viewAll")} />
-        <Rail titleKey="home.newClasses" ids={fresh} action={t("home.viewAll")} />
 
         {/* categories */}
         <section style={{ marginBottom: 10 }}>

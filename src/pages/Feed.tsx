@@ -836,7 +836,12 @@ function FeedCard({
 
 /* ============================ the feed ============================ */
 
-const WINDOW = 5; // mounted videos around the active index (lazy loading)
+/**
+ * Mounted-video window around the active index (Day 22 memory rule):
+ * only the visible dance + its immediate neighbors ever get a `src` —
+ * everything else stays a lightweight poster until the user scrolls to it.
+ */
+const WINDOW = 1;
 
 /* ============================ DENSEN action rail ============================ */
 

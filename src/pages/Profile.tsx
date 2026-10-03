@@ -117,6 +117,9 @@ function ProfileHeader({ userId }: { userId: string }) {
         <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
           {isMe ? (
             <>
+              <button className="btn btn-sm" onClick={() => nav("/account")}>
+                🪙 {t("account.credits")}
+              </button>
               <button className="btn btn-sm" onClick={() => nav("/settings")}>
                 <IcSettings size={16} /> {t("profile.settings")}
               </button>
