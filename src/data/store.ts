@@ -36,7 +36,7 @@ export interface Lesson {
   title: string;
   dur: number; // minutes
   video: string;
-  moves: { name: string; timing: string; tip: string }[];
+  moves: { name: string; timing: string; tip: string; atSec?: number }[];
   desc: string;
 }
 

@@ -326,7 +326,8 @@ describe("buildDiscoverSections", () => {
     expect(ids).toContain("styles");
     expect(ids).toContain("beginner");
     expect(ids).toContain("new_classes");
-    expect(ids).toContain("under5");
+    // Day 23 — free platform: the paid "under5" rail is gone.
+    expect(ids).not.toContain("under5");
     expect(ids).toContain("free");
   });
 
@@ -336,10 +337,9 @@ describe("buildDiscoverSections", () => {
     expect(buildDiscoverSections({ caller: ADULT, rows, now }).find((x) => x.id === "rising")?.rows.map((r) => r.id)).toEqual(["d1"]);
   });
 
-  it("under5 excludes free and expensive, free rail holds zero-price rows", () => {
+  it("Day 23: the free rail holds EVERY class (legacy prices no longer exclude)", () => {
     const s = buildDiscoverSections({ caller: GUEST, rows, now });
-    expect(s.find((x) => x.id === "under5")?.rows.map((r) => r.id)).toEqual(["cl2"]);
-    expect(s.find((x) => x.id === "free")?.rows.map((r) => r.id)).toEqual(["cl1"]);
+    expect(s.find((x) => x.id === "free")?.rows.map((r) => r.id).sort()).toEqual(["cl1", "cl2", "cl3"]);
   });
 
   it("trending boosts fresh moves over historically popular old ones", () => {
@@ -387,10 +387,16 @@ describe("sanitizeResults — the last gate", () => {
     expect(sanitizeResults(rows, { caller: ADULT })[0].city).toBe("tirana");
   });
 
-  it("projects price/isFree and never leaks the raw keywords field", () => {
-    const rows = [ent({ id: "cl1", kind: "class", label: "Class", priceCents: 0, keywords: ["secret", "words"] })];
+  it("projects free (never a price) and never leaks the raw keywords field", () => {
+    const rows = [
+      ent({ id: "cl1", kind: "class", label: "Class", priceCents: 0, keywords: ["secret", "words"] }),
+      ent({ id: "cl2", kind: "class", label: "Legacy Paid", priceCents: 900 }),
+    ];
     const out = sanitizeResults(rows, { caller: ADULT });
     expect(out[0].isFree).toBe(true);
+    expect(out[1].isFree).toBe(true);
+    expect("priceCents" in out[0]).toBe(false);
+    expect("priceCents" in out[1]).toBe(false);
     expect("keywords" in out[0]).toBe(false);
     expect(out[0].subtitle).toBe("secret · words");
   });

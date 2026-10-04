@@ -261,3 +261,41 @@ export function refundQueueOrder(a: { status: string; createdAt: number }, b: { 
   if (ra !== rb) return ra - rb;
   return a.createdAt - b.createdAt;
 }
+
+/* ---------------- provider event shape (Day 23: core-owned) ---------------- */
+
+/**
+ * The verified provider event the decision core accepts. Day 23 moved this
+ * type guard INTO the core: the provider integration module (paymentProvider
+ * + its wire) was removed with the purchase flow, but the event-application
+ * decision logic stays here — pure and unit-tested — as the documented seam
+ * a payment provider would have to satisfy if Densen ever reintroduced
+ * payments (it currently does not: the platform is free).
+ */
+export interface ProviderEvent {
+  /** Provider event id — the webhook idempotency key. */
+  eventRef: string;
+  /** The purchase/intent this event is about (purchases.providerRef). */
+  providerRef: string;
+  /** charge_succeeded | charge_failed | refund_executed | dispute_opened … */
+  type: string;
+  /** Signed minor-unit amount from the provider (charges positive). */
+  amountCents: number;
+  currency: string;
+  /** The provider's own status string — preserved raw for reconciliation. */
+  rawStatus: string;
+}
+
+export function isProviderEvent(x: unknown): x is ProviderEvent {
+  if (typeof x !== "object" || x === null) return false;
+  const e = x as Partial<ProviderEvent>;
+  return (
+    typeof e.eventRef === "string" &&
+    e.eventRef.length > 0 &&
+    typeof e.providerRef === "string" &&
+    typeof e.type === "string" &&
+    typeof e.amountCents === "number" &&
+    typeof e.currency === "string" &&
+    typeof e.rawStatus === "string"
+  );
+}

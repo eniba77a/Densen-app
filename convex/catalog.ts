@@ -13,8 +13,9 @@
  *   - Only rows with status "published" leave the database (fail-closed).
  *   - Teacher identity is projected from PUBLIC rows only (teacherProfiles
  *     displayName, users.handle) — no emails, no DOB, no PII.
- *   - Guests can browse the catalog; lesson *content access* is still gated
- *     by pricing on the class page and future purchase checks server-side.
+ *   - Day 23 — FREE PLATFORM: browsing and playing are open to everyone;
+ *     no purchase/credit check exists anywhere on this path. Uploaded video
+ *     refs resolve to playable storage URLs here (metadata only, never keys).
  *
  * Lesson status is course-gated: lessons are material of their course, so
  * their visibility follows the course publication state — no per-lesson
@@ -46,10 +47,28 @@ async function teacherProjection(db: Db, teacherId: string) {
 
 function priceFields(row: any) {
   return {
-    priceCents: row.priceCents ?? 0,
-    creditPrice: row.creditPrice ?? 0,
+    // Day 23 — free platform: the legacy fields remain in row data but the
+    // catalog no longer publishes a price; every lesson plays without payment.
+    priceCents: 0,
+    creditPrice: 0,
     currency: row.currency ?? "EUR",
   };
+}
+
+/**
+ * Day 23 — resolve a playable URL for an uploaded video. `videoRef` points
+ * at a `videos` row (Day 4 pipeline); only rows that finished processing and
+ * were not removed resolve to a URL, so drafts/failed uploads never play.
+ */
+async function videoUrlFor(db: Db, storage: any, videoRef: string | undefined): Promise<string | undefined> {
+  if (!videoRef) return undefined;
+  if (/^https?:\/\//i.test(videoRef)) return videoRef; // legacy external URL
+  const v = (await db.get(videoRef as never)) as { storageRef?: string; processingStatus?: string; moderationStatus?: string } | null;
+  if (!v?.storageRef) return undefined;
+  if ((v.processingStatus ?? "ready") !== "ready") return undefined;
+  if (v.moderationStatus === "removed") return undefined;
+  const url = await storage?.getUrl?.(v.storageRef as never);
+  return typeof url === "string" ? url : undefined;
 }
 
 /** Lessons of a course, position-ordered, with the fields the client renders. */
@@ -67,7 +86,17 @@ async function courseLessons(db: Db, courseId: string) {
       durationSec: l.durationSec ?? 0,
       xpReward: l.xpReward ?? 0,
       videoRef: l.videoRef ?? undefined,
+      videoUrl: undefined as string | undefined, // resolved below
+      steps: l.steps ?? [],
     }));
+}
+
+/** Resolve playable URLs for a projected lesson list (videos rows → storage). */
+async function resolveLessonUrls(db: Db, storage: any, lessons: Awaited<ReturnType<typeof courseLessons>>) {
+  for (const l of lessons) {
+    l.videoUrl = await videoUrlFor(db, storage, l.videoRef);
+  }
+  return lessons;
 }
 
 /**
@@ -75,7 +104,8 @@ async function courseLessons(db: Db, courseId: string) {
  * subscribes and new teacher publications appear without a refresh.
  */
 /** Published course row → catalog projection (with lessons). */
-async function projectCourse(db: Db, r: any) {
+async function projectCourse(db: Db, storage: any, r: any) {
+  const lessons = await resolveLessonUrls(db, storage, await courseLessons(db, r._id));
   return {
     id: r._id as string,
     kind: "course" as const,
@@ -88,12 +118,12 @@ async function projectCourse(db: Db, r: any) {
     ...priceFields(r),
     createdAt: r.createdAt as number,
     teacher: await teacherProjection(db, r.teacherId),
-    lessons: await courseLessons(db, r._id),
+    lessons,
   };
 }
 
 /** Published class row → catalog projection (single session, no lessons). */
-async function projectClass(db: Db, r: any) {
+async function projectClass(db: Db, storage: any, r: any) {
   return {
     id: r._id as string,
     kind: "class" as const,
@@ -105,6 +135,8 @@ async function projectClass(db: Db, r: any) {
     altText: r.altText ?? "Class cover",
     durationSec: r.durationSec ?? 0,
     ...priceFields(r),
+    videoUrl: await videoUrlFor(db, storage, r.videoRef),
+    steps: r.steps ?? [],
     createdAt: r.createdAt as number,
     teacher: await teacherProjection(db, r.teacherId),
   };
@@ -119,7 +151,7 @@ export const listPublishedCourses = queryGeneric({
       .filter((q: any) => q.eq(q.field("status"), "published"))
       .collect()) as any[];
     const out = [];
-    for (const r of rows) out.push(await projectCourse(ctx.db, r));
+    for (const r of rows) out.push(await projectCourse(ctx.db, ctx.storage, r));
     out.sort((a, b) => b.createdAt - a.createdAt);
     return { ok: true as const, courses: out };
   },
@@ -134,7 +166,7 @@ export const listPublishedClasses = queryGeneric({
       .filter((q: any) => q.eq(q.field("status"), "published"))
       .collect()) as any[];
     const out = [];
-    for (const r of rows) out.push(await projectClass(ctx.db, r));
+    for (const r of rows) out.push(await projectClass(ctx.db, ctx.storage, r));
     out.sort((a, b) => b.createdAt - a.createdAt);
     return { ok: true as const, classes: out };
   },
@@ -159,8 +191,8 @@ export const listPublishedAll = queryGeneric({
       | Awaited<ReturnType<typeof projectCourse>>
       | Awaited<ReturnType<typeof projectClass>>
     )[] = [];
-    for (const r of courseRows) out.push(await projectCourse(ctx.db, r));
-    for (const r of classRows) out.push(await projectClass(ctx.db, r));
+    for (const r of courseRows) out.push(await projectCourse(ctx.db, ctx.storage, r));
+    for (const r of classRows) out.push(await projectClass(ctx.db, ctx.storage, r));
     out.sort((a, b) => b.createdAt - a.createdAt);
     return out;
   },
@@ -195,7 +227,7 @@ export const getPublishedItem = queryGeneric({
           ...priceFields(row),
           createdAt: row.createdAt as number,
           teacher,
-          lessons: await courseLessons(ctx.db, row._id),
+          lessons: await resolveLessonUrls(ctx.db, ctx.storage, await courseLessons(ctx.db, row._id)),
         },
       };
     }
@@ -214,6 +246,8 @@ export const getPublishedItem = queryGeneric({
         altText: row.altText ?? "Class cover",
         durationSec: row.durationSec ?? 0,
         ...priceFields(row),
+        videoUrl: await videoUrlFor(ctx.db, ctx.storage, row.videoRef),
+        steps: row.steps ?? [],
         createdAt: row.createdAt as number,
         teacher,
         lessons: [] as { id: string; position: number; title: string; durationSec: number; xpReward: number }[],

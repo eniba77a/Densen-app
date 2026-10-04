@@ -203,8 +203,8 @@ const classes = defineTable({
   difficulty: v.union(v.literal("beginner"), v.literal("intermediate"), v.literal("advanced")),
   coverUrl: v.string(),
   altText: v.string(), // accessibility: every media row ships alt text
-  /** Free vs paid classes: priceCents 0 = free; creditPrice enables
-   *  Dance-Credit unlocking without touching the money rails. */
+  /** Free vs paid classes: priceCents 0 = free. Day 23: the platform is fully
+   *  free — legacy fields are historical data and no longer gate anything. */
   priceCents: v.number(),
   creditPrice: v.number(),
   // Day 8 studio publishing (additive): duration + lifecycle extras.
@@ -213,6 +213,9 @@ const classes = defineTable({
   visibility: v.optional(v.union(v.literal("public"), v.literal("followers"), v.literal("private"))),
   videoRef: v.optional(v.string()),
   thumbnailRef: v.optional(v.string()),
+  // Day 23 (additive): teacher movement timestamps for the practice player —
+  // optional, so every legacy row stays valid without a backfill.
+  steps: v.optional(v.array(v.object({ label: v.string(), atSec: v.number() }))),
   status: publishStatus,
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -319,6 +322,8 @@ const lessons = defineTable({
   title: v.string(),
   description: v.optional(v.string()), // Day 8: lesson pages show what the drill teaches
   videoRef: v.optional(v.string()), // storage ref; metadata only, URLs signed at read time
+  // Day 23 (additive): optional teacher movement timestamps per lesson.
+  steps: v.optional(v.array(v.object({ label: v.string(), atSec: v.number() }))),
   durationSec: v.number(),
   xpReward: v.number(),
   status: publishStatus,
@@ -416,7 +421,10 @@ const lessonProgress = defineTable({
 })
   .index("by_user_lesson", ["userId", "lessonKey"])
   .index("by_user_course", ["userId", "courseKey"])
-  .index("by_user_recent", ["userId", "updatedAt"]);
+  .index("by_user_recent", ["userId", "updatedAt"])
+  // Day 23 (additive): content-side lookup — learners of one course/class,
+  // used for teacher stats and dependent-row cleanup on content deletion.
+  .index("by_course", ["courseKey"]);
 
 /* ---------------- content module ---------------- */
 const videos = defineTable({

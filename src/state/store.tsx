@@ -41,6 +41,9 @@ interface Persisted {
     allowDuet: boolean;
     messagesFrom: "everyone" | "followers" | "none";
     commentFilter: boolean;
+    /** Day 23 — Dancer vs Teacher experience. Teacher Mode only takes effect
+     *  for verified teachers (see effectiveMode in src/lib/mode.ts). */
+    mode: "dancer" | "teacher";
   };
 }
 
@@ -63,6 +66,7 @@ const defaults: Persisted = {
     allowDuet: true,
     messagesFrom: "everyone",
     commentFilter: true,
+    mode: "dancer",
   },
 };
 

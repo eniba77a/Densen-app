@@ -168,7 +168,7 @@ export default function Home() {
       <div style={{ maxWidth: 1160, margin: "0 auto", padding: "26px 20px 0" }}>
         {/* quick actions — the secondary destinations, one level inside Home */}
         <div className="no-scrollbar" style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 30 }}>
-          {["feed", "arcade", "challenges", "events", "leaderboards", "teams", "practice", "audio", "live", "progress"].map((r) => (
+          {["feed", "create", "arcade", "challenges", "events", "leaderboards", "teams", "practice", "audio", "live", "progress"].map((r) => (
             <button key={r} className="chip" onClick={() => nav(`/${r}`)}>
               {t(`nav.${r}` as never)}
             </button>

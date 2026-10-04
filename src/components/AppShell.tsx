@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import { conversations, notifications } from "../data/store";
 import { ME, useStore } from "../state/store";
 import { useAuth } from "../state/auth";
+import { effectiveMode, type AppMode } from "../lib/mode";
 import { Avatar, Logo, ToastHost } from "./ui";
 import {
   IcBell,
@@ -50,6 +51,17 @@ function useLiveBadges(sessionToken: string | null): { notifs: number; chats: nu
 function useTKey() {
   const { t } = useStore();
   return t;
+}
+
+/**
+ * Day 23 — the active experience. The PREFERENCE is a client setting; the
+ * PERMISSION is the server session role. effectiveMode never lets a dancer
+ * render Teacher Mode, and switching modes never grants any role.
+ */
+function useMode(): AppMode {
+  const { viewer } = useAuth();
+  const { settings } = useStore();
+  return effectiveMode(settings.mode, viewer);
 }
 
 /* ---------------- top bar ---------------- */
@@ -168,23 +180,42 @@ const RedDot = () => (
  * Learn, credits in Profile/Account, challenges & events from Home quick
  * actions — instead of being permanent top-level destinations.
  */
-const SIDE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) => JSX.Element; key: TKey }[] = [
-  { to: "/", icon: IcHome, key: "nav.home" },
+/**
+ * Day 23 — mode-specific navigation, ≤5 primary destinations each:
+ *   Dancer:  Home · Explore · Learn · Messages · Profile
+ *   Teacher: Dashboard · My Lessons · Create · Messages · Profile
+ * Secondary features live one level inside these sections (Home quick
+ * actions, Profile, sidebar “more” links) — never as extra tabs.
+ */
+type NavItem = { to: string; icon: (p: { size?: number; filled?: boolean }) => JSX.Element; key: TKey; exact?: boolean };
+
+const DANCER_SIDE: NavItem[] = [
+  { to: "/", icon: IcHome, key: "nav.home", exact: true },
+  { to: "/discover", icon: IcCompass, key: "nav.explore" },
   { to: "/learn", icon: IcLearn, key: "nav.learn" },
   { to: "/messages", icon: IcMessage, key: "nav.messages" },
   { to: "/profile", icon: IcUser, key: "nav.profile" },
 ];
 
-const SIDE_MORE_LINKS: { to: string; icon: (p: { size?: number; filled?: boolean }) => JSX.Element; key: TKey }[] = [
-  { to: "/discover", icon: IcCompass, key: "nav.discover" },
+const TEACHER_SIDE: NavItem[] = [
+  { to: "/studio", icon: IcFlame, key: "nav.dashboard", exact: true },
+  { to: "/studio/lessons", icon: IcLearn, key: "nav.myLessons" },
+  { to: "/messages", icon: IcMessage, key: "nav.messages" },
+  { to: "/profile", icon: IcUser, key: "nav.profile" },
+];
+
+const SIDE_MORE_LINKS: NavItem[] = [
   { to: "/arcade", icon: IcTrophy, key: "nav.arcade" },
   { to: "/progress", icon: IcFlame, key: "nav.progress" },
-  { to: "/studio", icon: IcLearn, key: "studio.title" },
 ];
 
 function Sidebar() {
   const t = useTKey();
   const nav = useNavigate();
+  const mode = useMode();
+  const links = mode === "teacher" ? TEACHER_SIDE : DANCER_SIDE;
+  const createTo = mode === "teacher" ? "/studio/new" : "/create";
+  const createLabel = mode === "teacher" ? t("studio.create") : t("nav.create");
   return (
     <aside
       className="show-desktop"
@@ -205,11 +236,11 @@ function Sidebar() {
       <NavLink to="/" style={{ padding: "6px 10px 18px", textDecoration: "none", color: "inherit" }}>
         <Logo size={22} />
       </NavLink>
-      {SIDE_LINKS.map(({ to, icon: Icon, key }) => (
-        <SideLink key={to} to={to} icon={<Icon size={21} />} label={t(key)} />
+      {links.map(({ to, icon: Icon, key }) => (
+        <SideLink key={key} to={to} icon={<Icon size={21} />} label={t(key)} />
       ))}
       <button
-        onClick={() => nav("/create")}
+        onClick={() => nav(createTo)}
         style={{
           display: "flex",
           alignItems: "center",
@@ -225,7 +256,7 @@ function Sidebar() {
           cursor: "pointer",
         }}
       >
-        <IcPlus size={18} /> {t("nav.create")}
+        <IcPlus size={18} /> {createLabel}
       </button>
       {SIDE_MORE_LINKS.map(({ to, icon: Icon, key }) => (
         <SideLink key={to} to={to} icon={<Icon size={21} />} label={t(key)} />
@@ -238,24 +269,35 @@ function Sidebar() {
   );
 }
 
+/**
+ * Sidebar link with Day 23 query-aware active state (Dashboard vs My Lessons
+ * are both on /studio — the ?view param decides which one highlights).
+ */
 function SideLink({ to, icon, label }: { to: string; icon: React.ReactNode; label: string }) {
+  const { pathname, search } = useLocation();
+  const [basePath, query = ""] = to.split("?");
+  const active = query
+    ? pathname === basePath && search.includes(query)
+    : basePath === "/"
+      ? pathname === "/"
+      : pathname === basePath || pathname.startsWith(basePath + "/");
   return (
     <NavLink
       to={to}
-      end={to === "/"}
-      style={({ isActive }) => ({
+      end={basePath === "/"}
+      style={{
         display: "flex",
         alignItems: "center",
         gap: 12,
         padding: "11px 12px",
         borderRadius: 13,
         textDecoration: "none",
-        color: isActive ? "var(--gold)" : "var(--ink-dim)",
-        background: isActive ? "var(--gold-soft)" : "transparent",
+        color: active ? "var(--gold)" : "var(--ink-dim)",
+        background: active ? "var(--gold-soft)" : "transparent",
         fontWeight: 700,
         fontSize: 14,
         transition: "all 0.18s ease",
-      })}
+      }}
     >
       {icon}
       {label}
@@ -265,16 +307,18 @@ function SideLink({ to, icon, label }: { to: string; icon: React.ReactNode; labe
 
 /* ---------------- mobile bottom nav ---------------- */
 /**
- * Day 22 — exactly five primary destinations (spec: Home · Learn · Create ·
- * Messages · Profile). Arcade, credits, search, notifications, settings and
- * purchases live inside their sections; nothing was removed from the app.
+ * Day 23 — five primary destinations per mode:
+ *   Dancer:  Home · Explore · Learn · Messages · Profile
+ *   Teacher: Dashboard · My Lessons · Create · Messages · Profile
+ * Everything else lives one level inside these sections.
  */
 function BottomNav() {
   const t = useTKey();
   const nav = useNavigate();
   const { pathname } = useLocation();
+  const mode = useMode();
   const item = (to: string, icon: React.ReactNode, label: string, center?: boolean) => {
-    const active = center ? pathname === to : pathname === to;
+    const active = pathname === to;
     return (
       <button
         key={to}
@@ -343,11 +387,23 @@ function BottomNav() {
         borderTop: "1px solid var(--line)",
       }}
     >
-      {item("/", <IcHome size={22} />, t("nav.home"))}
-      {item("/learn", <IcLearn size={22} />, t("nav.learn"))}
-      {item("/create", <IcPlus size={26} />, t("nav.create"), true)}
-      {item("/messages", <IcMessage size={22} />, t("nav.messages"))}
-      {item("/profile", <IcUser size={22} />, t("nav.profile"))}
+      {mode === "teacher" ? (
+        <>
+          {item("/studio", <IcFlame size={22} />, t("nav.dashboard"))}
+          {item("/studio/lessons", <IcLearn size={22} />, t("nav.myLessons"))}
+          {item("/studio/new", <IcPlus size={26} />, t("studio.create"), true)}
+          {item("/messages", <IcMessage size={22} />, t("nav.messages"))}
+          {item("/profile", <IcUser size={22} />, t("nav.profile"))}
+        </>
+      ) : (
+        <>
+          {item("/", <IcHome size={22} />, t("nav.home"))}
+          {item("/discover", <IcCompass size={22} />, t("nav.explore"))}
+          {item("/learn", <IcLearn size={22} />, t("nav.learn"), true)}
+          {item("/messages", <IcMessage size={22} />, t("nav.messages"))}
+          {item("/profile", <IcUser size={22} />, t("nav.profile"))}
+        </>
+      )}
     </nav>
   );
 }
@@ -360,7 +416,6 @@ function GovFooter() {
     ["/legal/terms", t("gov.readTerms")],
     ["/legal/privacy", t("gov.readPrivacy")],
     ["/legal/cookies", t("gov.cookie.prefsTitle")],
-    ["/legal/refunds", "Refunds"],
     ["/privacy", t("gov.privacyCenter")],
     ["/safety", t("gov.safetyCenter")],
     ["/business", t("gov.businessInfo")],

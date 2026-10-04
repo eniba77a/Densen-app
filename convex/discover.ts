@@ -530,23 +530,13 @@ export function buildDiscoverSections({ caller, rows, now, risingWindowMs = 30 *
   // 🆕 New Classes
   add("new_classes", "New Classes", rankEntities({ rows: byKind("class"), mode: "new", limit: RAIL_LIMIT }));
 
-  // 💰 Under €5 — paid classes/courses below €5 (the paid band starts at €2).
-  add(
-    "under5",
-    "Under €5",
-    rankEntities({
-      rows: [...byKind("class"), ...byKind("course")].filter((r) => (r.priceCents ?? 0) > 0 && (r.priceCents ?? 0) < 500),
-      mode: "price_asc",
-      limit: RAIL_LIMIT,
-    }),
-  );
-
-  // 🆓 Free Classes
+  // 🆓 Free Classes — Day 23: the platform is free, so EVERY class/course is
+  // in this rail (legacy rows with historical price fields included).
   add(
     "free",
     "Free Classes",
     rankEntities({
-      rows: [...byKind("class"), ...byKind("course")].filter((r) => r.priceCents === 0),
+      rows: [...byKind("class"), ...byKind("course")],
       mode: "popularity",
       limit: RAIL_LIMIT,
     }),
@@ -585,9 +575,12 @@ export function sanitizeResults(rows: SearchEntity[], opts: { caller: SearchCall
     };
     if (r.verified) out.verified = true;
     if (r.level) out.level = r.level;
-    if (r.priceCents !== undefined) {
-      out.priceCents = r.priceCents;
-      out.isFree = r.priceCents === 0;
+    // Day 23 — free platform: no prices leave the server. Classes/courses
+    // are always marked free; legacy price fields are never projected.
+    if (r.kind === "class" || r.kind === "course") {
+      out.isFree = true;
+    } else if (r.priceCents !== undefined && r.priceCents === 0) {
+      out.isFree = true;
     }
     // Broad city display: signed-in ADULT callers may see a row's city —
     // the wire only ever attaches cities whose OWNER consented (showCity).

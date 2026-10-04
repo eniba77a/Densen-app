@@ -20,7 +20,7 @@ import {
   refundQueueOrder,
   teacherRevenueFromTransactions,
 } from "../../convex/payments";
-import { isProviderEvent, type ProviderEvent } from "../../convex/paymentProvider";
+import { isProviderEvent, type ProviderEvent } from "../../convex/payments";
 
 const CALLER = { userId: "u1", userStatus: "active" };
 const PAID_CLASS = {

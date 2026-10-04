@@ -13,38 +13,14 @@ import {
   bandLabel,
   CONSENT_LABELS,
   DELETION_CONSEQUENCES,
-  money,
   PERMISSIONS,
   POLICY_VERSIONS,
-  refundStatusNote,
   TRANSACTIONAL_EMAILS,
   type PermissionKey,
 } from "../data/governance";
-import { courseById } from "../data/store";
 import { useAuth } from "../state/auth";
 
-/** Day 14 — server purchase row shape (listMyPurchases projection). */
-interface ServerPurchase {
-  id: string;
-  title: string;
-  classId: string;
-  amountCents: number;
-  currency: string;
-  provider: string;
-  status: string;
-  receiptState: string;
-  refundStatus?: string;
-  createdAt: number;
-}
-
-/** Bilingual refund-request reason labels (closed vocabulary from the core). */
-const REFUND_REASON_LABELS: Record<string, { en: string; sq: string }> = {
-  duplicate_purchase: { en: "Duplicate purchase", sq: "Blerje e dyfishtë" },
-  accidental_purchase: { en: "Accidental purchase", sq: "Blerje aksidentale" },
-  content_not_as_described: { en: "Content not as described", sq: "Përmbajtja nuk përputhej me përshkrimin" },
-  technical_issue: { en: "Technical issue", sq: "Problem teknik" },
-  other: { en: "Other", sq: "Tjetër" },
-};
+/** Day 23 — purchases/refunds removed with the free platform. */
 
 function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
@@ -92,19 +68,6 @@ export default function Settings() {
   const nav = useNavigate();
   const loc = useLocation();
   const [gate, setGate] = useState<PermissionKey | null>(null);
-  const auth = useAuth();
-
-  // Day 14 — signed-in users get the REAL purchase ledger (server history,
-  // receipt state, refund linkage). Guests keep the local mirror preview.
-  const serverPurchases = useQuery(
-    api.paymentsWire.listMyPurchases,
-    auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
-  );
-  const requestRefundMut = useMutation(api.paymentsWire.requestRefund);
-  const liveServerPurchases: ServerPurchase[] =
-    serverPurchases && typeof serverPurchases === "object" && "ok" in serverPurchases && serverPurchases.ok
-      ? (serverPurchases.purchases as ServerPurchase[])
-      : [];
 
   // honor #hash anchors from the Privacy Center deep links
   useEffect(() => {
@@ -357,107 +320,7 @@ export default function Settings() {
         </div>
       </Section>
 
-      {/* purchases & refunds — server ledger when signed in, guest mirror otherwise */}
-      <Section id="purchases" title={`💳 ${t("gov.purchases")}`}>
-        {auth.sessionToken ? (
-          liveServerPurchases.length === 0 ? (
-            <p className="faint" style={{ fontSize: 13 }}>{t("gov.purchasesEmpty")}</p>
-          ) : (
-            <>
-              <p className="faint" style={{ fontSize: 12, margin: "-4px 0 10px" }}>{t("pay.historySub")}</p>
-              <div style={{ display: "grid", gap: 10 }}>
-                {liveServerPurchases.map((p) => (
-                  <div key={p.id} className="panel" style={{ padding: 14 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{p.title}</div>
-                        <div className="faint" style={{ fontSize: 12 }}>
-                          {new Date(p.createdAt).toLocaleDateString()} · {p.provider}
-                        </div>
-                        {/* Receipt state — never hides the final price or money state */}
-                        <p className="faint" style={{ fontSize: 12, marginTop: 6 }}>{t(("pay.receiptStatus." + p.receiptState) as TKey)}</p>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{money(p.amountCents, p.currency)}</div>
-                        <div className="faint" style={{ fontSize: 11 }}>+ {t("gov.buy.fees")}: 0.00 {p.currency}</div>
-                        <StatusPill
-                          status={p.receiptState === "paid" ? "pass" : p.receiptState === "failed" || p.receiptState === "refunded" ? "action_required" : "warning"}
-                          label={p.receiptState}
-                        />
-                      </div>
-                    </div>
-                    {/* Refund state comes from the server; staff review + the
-                        provider move it forward — no client-side advancing. */}
-                    {p.refundStatus && (
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-                        <StatusPill
-                          status={p.refundStatus === "refunded" || p.refundStatus === "approved" ? "pass" : p.refundStatus === "rejected" ? "action_required" : "warning"}
-                          label={t(("pay.refundStatus." + p.refundStatus) as TKey)}
-                        />
-                        <p className="faint" style={{ fontSize: 12, marginTop: 6 }}>{t("pay.openRequest")}</p>
-                      </div>
-                    )}
-                    {p.receiptState === "paid" && !p.refundStatus && (
-                      <RefundForm
-                        onSubmit={(reason) => {
-                          void requestRefundMut({ sessionToken: auth.sessionToken!, purchaseId: p.id, reason })
-                            .then(() => toast(t("gov.refund.requested")))
-                            .catch(() => toast(t("common.error")));
-                        }}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          )
-        ) : gov.purchases.length === 0 ? (
-          <p className="faint" style={{ fontSize: 13 }}>{t("gov.purchasesEmpty")}</p>
-        ) : (
-          <>
-            <p className="faint" style={{ fontSize: 12, margin: "-4px 0 10px" }}>{t("pay.demoNote")}</p>
-            <div style={{ display: "grid", gap: 10 }}>
-              {gov.purchases.map((p) => {
-                const refund = gov.refunds.find((r) => r.purchaseId === p.id);
-                const course = courseById(p.courseId);
-                return (
-                  <div key={p.id} className="panel" style={{ padding: 14 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{p.title}</div>
-                        <div className="faint" style={{ fontSize: 12 }}>{course?.style} · {new Date(p.ts).toLocaleDateString()}</div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontWeight: 800, fontSize: 14 }}>{money(p.priceCents, p.currency)}</div>
-                        <div className="faint" style={{ fontSize: 11 }}>+ {t("gov.buy.fees")}: 0.00 {p.currency}</div>
-                      </div>
-                    </div>
-                    {!refund && (
-                      <RefundForm
-                        onSubmit={(reason) => {
-                          gov.requestRefund(p.id, reason);
-                          toast(t("gov.refund.requested"));
-                        }}
-                      />
-                    )}
-                    {refund && (
-                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-                        <StatusPill status={refund.status === "refunded" || refund.status === "approved" ? "pass" : refund.status === "rejected" ? "action_required" : "warning"} label={t(("gov.refund." + refund.status) as TKey)} />
-                        <p className="faint" style={{ fontSize: 12, marginTop: 6 }}>{tx(refundStatusNote(refund.status), lang)}</p>
-                        {refund.status !== "refunded" && refund.status !== "rejected" && (
-                          <button className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => gov.advanceRefund(refund.id, true)}>
-                            {t("gov.refund.advance")} →
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </Section>
+      {/* Day 23 — purchases/refunds removed: Densen is completely free. */}
 
       {/* consent history */}
       <Section id="consents" title={`🧾 ${t("gov.consents.title")}`}>
@@ -569,47 +432,7 @@ function NotificationPrefsSection() {
   );
 }
 
-/* ---------------- refund request form (typed reasons, server vocabulary) ---------------- */
-function RefundForm({ onSubmit }: { onSubmit: (reason: string) => void }) {
-  const { t, lang } = useStore();
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState("duplicate_purchase");
-  if (!open)
-    return (
-      <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setOpen(true)}>
-        ↩️ {t("gov.refund.request")}
-      </button>
-    );
-  return (
-    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-      <label className="input-label" htmlFor="refund-reason">{t("gov.refund.reason")}</label>
-      <select
-        id="refund-reason"
-        className="input"
-        value={reason}
-        aria-label={t("gov.refund.reason")}
-        onChange={(e) => setReason(e.target.value)}
-      >
-        {Object.entries(REFUND_REASON_LABELS).map(([value, label]) => (
-          <option key={value} value={value}>{tx(label, lang)}</option>
-        ))}
-      </select>
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button className="btn btn-sm" onClick={() => setOpen(false)}>{t("common.cancel")}</button>
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={() => {
-            onSubmit(reason);
-            setOpen(false);
-            setReason("duplicate_purchase");
-          }}
-        >
-          {t("gov.refund.submit")}
-        </button>
-      </div>
-    </div>
-  );
-}
+/* ---------------- Day 23 — refund request form removed (free platform) ---------------- */
 
 /* ---------------- delete account card ---------------- */
 function DeleteAccountCard() {

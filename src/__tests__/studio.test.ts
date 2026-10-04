@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest";
 import {
   decidePublishTransition,
   decideStudioAccess,
+  decideStudioDelete,
   decideStudioEdit,
+  normalizeSteps,
   splitRevenue,
   validateStudioItem,
   STUDIO_KINDS,
@@ -150,5 +152,49 @@ describe("catalog vocabulary", () => {
     expect([...STUDIO_KINDS]).toEqual(["move", "combo", "choreography", "class", "course", "challenge"]);
     expect(PAID_MIN_CENTS).toBe(200);
     expect(PAID_MAX_CENTS).toBe(3000);
+  });
+});
+
+describe("Day 23 — item deletion uses the same ownership rule as editing", () => {
+  it("the owner may delete their own lesson", () => {
+    expect(decideStudioDelete(activeTeacher, "u_t")).toEqual({ ok: true });
+  });
+
+  it("another teacher CANNOT delete someone else's lesson", () => {
+    const other = { userId: "u_other", role: "teacher" as const, userStatus: "active" as const };
+    expect(decideStudioDelete(other, "u_t")).toEqual({ ok: false, error: "not_owner" });
+  });
+
+  it("an admin may administer deletions; guests and restricted callers fail closed", () => {
+    expect(decideStudioDelete(activeAdmin, "u_t")).toEqual({ ok: true });
+    expect(decideStudioDelete(null, "u_t")).toEqual({ ok: false, error: "unauthenticated" });
+    expect(decideStudioDelete({ ...activeTeacher, userStatus: "suspended" }, "u_t")).toEqual({ ok: false, error: "caller_restricted" });
+  });
+});
+
+describe("Day 23 — teacher movement timestamps (normalizeSteps)", () => {
+  it("trims labels, drops nothing valid, and sorts chronologically", () => {
+    const r = normalizeSteps([
+      { label: "  shoulder pop ", atSec: 12.4 },
+      { label: "opening pose", atSec: 0 },
+      { label: "turn", atSec: 8.05 },
+    ]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.steps).toEqual([
+      { label: "opening pose", atSec: 0 },
+      { label: "turn", atSec: 8.1 },
+      { label: "shoulder pop", atSec: 12.4 },
+    ]);
+  });
+
+  it("accepts absent/empty step lists", () => {
+    expect(normalizeSteps(undefined)).toEqual({ ok: true, steps: [] });
+    expect(normalizeSteps([])).toEqual({ ok: true, steps: [] });
+  });
+
+  it("rejects bad labels, bad times, and oversized lists", () => {
+    expect(normalizeSteps([{ label: "   ", atSec: 1 }]).ok).toBe(false);
+    expect(normalizeSteps([{ label: "x", atSec: -5 }]).ok).toBe(false);
+    expect(normalizeSteps(Array.from({ length: 41 }, (_, i) => ({ label: `s${i}`, atSec: i }))).ok).toBe(false);
   });
 });

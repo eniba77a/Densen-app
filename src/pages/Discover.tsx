@@ -80,10 +80,11 @@ function fallbackFor(id: string): string {
   return FALLBACKS[h % FALLBACKS.length];
 }
 
+/** Day 23 — free platform: classes/courses show Free; prices are gone. */
 function priceLabel(r: ResultRow): string | null {
-  if (r.priceCents === undefined) return null;
   if (r.isFree) return "Free";
-  return `€${(r.priceCents / 100).toFixed(2)}`;
+  if (r.priceCents === undefined) return null;
+  return "Free";
 }
 
 export default function Discover() {
