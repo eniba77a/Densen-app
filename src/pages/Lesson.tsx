@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Empty, LevelBadge, Page } from "../components/ui";
-import { IcCheck, IcPause, IcPlay } from "../components/icons";
+import { IcCheck, IcPlay } from "../components/icons";
+import PracticePlayer from "../components/PracticePlayer";
 import { useStore } from "../state/store";
 import { useAuth } from "../state/auth";
 import { courseById, userById } from "../data/store";
@@ -29,11 +30,10 @@ export default function Lesson() {
   const [serverXp, setServerXp] = useState<number | null>(null);
 
   const [phase, setPhase] = useState<Phase>("watch");
-  const [playing, setPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
+  // Day 23 — playback (speeds, scrubbing, A–B practice) lives in the shared
+  // PracticePlayer; the lesson page keeps the dancer-facing toggles.
   const [mirror, setMirror] = useState(false);
   const [loop, setLoop] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     setPhase("watch");
@@ -45,11 +45,6 @@ export default function Lesson() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lessonId]);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (v) v.playbackRate = speed;
-  }, [speed, playing, phase]);
 
   if (!course || !lesson) return <Page><Empty icon="🔍" text="Lesson not found" /></Page>;
 
@@ -71,66 +66,32 @@ export default function Lesson() {
     done: t("lesson.congrats"),
   };
 
-  const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) v.play();
-    else v.pause();
-    setPlaying(!v.paused);
-  };
-
   return (
     <Page>
       <button onClick={() => nav(`/course/${course.id}`)} className="btn btn-ghost btn-sm" style={{ marginBottom: 14 }}>
         ← {t("lesson.backToCourse")}
       </button>
 
-      {/* stage */}
-      <div className="video-stage">
-        <video
-          ref={videoRef}
-          src={lesson.video}
-          poster={course.cover}
-          autoPlay
-          muted
-          loop={loop}
-          playsInline
-          style={{ transform: mirror ? "scaleX(-1)" : undefined }}
-        />
-        <button
-          onClick={togglePlay}
-          style={{ position: "absolute", inset: 0, background: "transparent", border: "none", cursor: "pointer" }}
-          aria-label="toggle play"
-        />
-        {!playing && (
-          <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-            <span style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(227,179,65,0.92)", color: "#171204", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <IcPlay size={26} />
-            </span>
-          </span>
-        )}
-        <span className="chip" style={{ position: "absolute", top: 12, left: 12, background: "rgba(10,12,16,0.75)", fontSize: 11, padding: "4px 10px" }}>
-          {phase === "watch" ? "👀" : phase === "learn" ? "🧠" : phase === "practice" ? "🎯" : "🏁"} {t(phases.find((p) => p.id === phase)!.label as never)}
-        </span>
-        <span className="chip" style={{ position: "absolute", top: 12, right: 12, background: "rgba(10,12,16,0.75)", fontSize: 11, padding: "4px 10px" }}>
-          {lesson.dur} {t("common.min")}
-        </span>
-      </div>
+      {/* Day 23 — practice player: slow motion (0.25/0.5/0.75/1×), scrubbing,
+          seek/replay/fullscreen/volume, A–B section repeat, teacher timestamps.
+          The chosen speed is remembered per lesson while practicing. */}
+      <PracticePlayer
+        src={lesson.video}
+        poster={course.cover}
+        lessonKey={lesson.id}
+        steps={lesson.moves}
+        autoPlay
+        mirror={mirror}
+        loopAll={loop}
+      />
 
-      {/* controls */}
+      {/* dancer-facing toggles (the player owns playback) */}
       <div style={{ display: "flex", gap: 8, margin: "12px 0 4px", flexWrap: "wrap", alignItems: "center" }}>
-        <button className={`chip${speed === 0.75 ? " active" : ""}`} onClick={() => setSpeed(speed === 1 ? 0.75 : speed === 0.75 ? 0.5 : 1)}>
-          {t("lesson.speed")} {speed}×
-        </button>
         <button className={`chip${mirror ? " active" : ""}`} onClick={() => setMirror(!mirror)}>
           🪞 {t("lesson.mirror")}
         </button>
         <button className={`chip${loop ? " active" : ""}`} onClick={() => setLoop(!loop)}>
           🔁 {t("lesson.loop")}
-        </button>
-        <div style={{ flex: 1 }} />
-        <button className="btn btn-sm" onClick={togglePlay}>
-          {playing ? <IcPause size={15} /> : <IcPlay size={15} />} {playing ? "Pause" : t("lesson.watch")}
         </button>
       </div>
 
@@ -180,12 +141,15 @@ export default function Lesson() {
           <div>
             <h2 style={{ fontSize: 18, marginBottom: 10 }}>🎯 {t("lesson.practice")}</h2>
             <p className="muted" style={{ lineHeight: 1.65, fontSize: 14.5, margin: "0 0 14px" }}>{t("lesson.practiceTip")}</p>
+            <p className="faint" style={{ fontSize: 12.5, margin: "0 0 12px", lineHeight: 1.6 }}>
+              🐢 {t("player.speed")}: 0.25× / 0.5× / 0.75× / 1× · 🔁 {t("player.practice")}: A–B · 📑 {t("player.timestamps")}
+            </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className={`chip${speed === 0.75 ? " active" : ""}`} onClick={() => { setSpeed(0.75); setMirror(true); setLoop(true); }}>
-                🐢 0.75× + {t("lesson.mirror")} + {t("lesson.loop")}
+              <button className="chip" onClick={() => { setMirror(true); setLoop(true); }}>
+                🪞 {t("lesson.mirror")} + {t("lesson.loop")}
               </button>
-              <button className="chip" onClick={() => { setSpeed(1); setMirror(false); setLoop(false); }}>
-                ⚡ 1×
+              <button className="chip" onClick={() => { setMirror(false); setLoop(false); }}>
+                ⚡ {t("player.normal")}
               </button>
             </div>
           </div>

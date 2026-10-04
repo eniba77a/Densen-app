@@ -10,50 +10,24 @@ import { useGov } from "../state/governance";
 import { useAuth } from "../state/auth";
 import { courseById, fmt, userById } from "../data/store";
 import { useCatalogCourse } from "../data/useCatalogCourse";
-import { courseMinutes, pricingOf, whatYouLearn } from "../data/learning";
-import { money } from "../data/governance";
+import { courseMinutes, whatYouLearn } from "../data/learning";
 import { Empty, Page } from "../components/ui";
-import { Modal, StatusPill } from "../components/gov-ui";
-import { averageRating, reviewsFor, refundStatusNote } from "../data/governance";
+import { StatusPill } from "../components/gov-ui";
+import { averageRating, reviewsFor } from "../data/governance";
 
 export default function CourseDetail() {
   const { courseId } = useParams();
   const savePractice = useMutation(api.practiceWire.saveItem);
   const nav = useNavigate();
   const { t, lang, isLessonDone, following, toggleFollow, saved, toggleSave, toast } = useStore();
-  const gov = useGov();
   const auth = useAuth();
   // Day 8 — resolve seed catalog ids instantly; Studio-published ids resolve
   // through the live public catalog (reactive, guest-browsable).
   const catalogItem = useCatalogCourse(courseId);
   const c = catalogItem?.course ?? (courseId ? courseById(courseId) : undefined);
   const [playing, setPlaying] = useState(false);
-  const [checkout, setCheckout] = useState(false);
-  const [spending, setSpending] = useState(false);
-  // Day 14 — real checkout state. `provider_not_configured` is the HONEST
-  // outcome until a payment provider is registered; the message says exactly
-  // that and nothing becomes paid.
-  const [buying, setBuying] = useState(false);
-  const [buyMsg, setBuyMsg] = useState<string | null>(null);
-
-  // Day 10 — real Dance-Credits unlock: the button below spends from the
-  // server-authoritative ledger (never local state). Replay-safe via the
-  // ledger's refId probe; balance and history are reactive subscriptions.
-  const spendCredits = useMutation(api.creditsWire.spendCredits);
-  // Day 14 — real purchase intent + server-owned entitlement + receipt history.
-  const startPurchase = useMutation(api.paymentsWire.startPurchase);
-  const myPurchases = useQuery(
-    api.paymentsWire.listMyPurchases,
-    auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
-  );
-  const serverPurchaseOwned =
-    myPurchases?.ok === true &&
-    Array.isArray(myPurchases.purchases) &&
-    myPurchases.purchases.some((p: { classId?: string; status?: string }) => p.classId === c?.id && p.status === "paid");
-  const myCredits = useQuery(
-    api.creditsWire.getMyCredits,
-    auth.sessionToken ? { sessionToken: auth.sessionToken } : "skip"
-  );
+  // Day 23 — Densen is a FREE platform: every published lesson plays without
+  // payment or credits. The purchase/credit-unlock flows were removed.
 
   // Day 7 — live server progress: completion status and the % bar are a
   // reactive Convex subscription, so a completed lesson updates here and on
@@ -86,23 +60,10 @@ export default function CourseDetail() {
   const isFollowing = following.has(teacher.id);
   const isSaved = saved.has(c.id);
   const nextLesson = c.lessons.find((l) => !isDone(l.id)) ?? c.lessons[0];
-  const priced = catalogItem?.pricing ?? pricingOf(c.id)!;
-  const owned = gov.owns(c.id);
-  // Day 10 — server-side unlock state: a recorded credit spend for this
-  // class in the ledger means unlocked, regardless of local mirrors.
-  // Day 14 — a verified PAID purchase on the server also means unlocked.
-  const serverOwned =
-    (myCredits?.ok === true &&
-      Array.isArray(myCredits.history) &&
-      myCredits.history.some((h) => h.refId === `class:${c.id}` && h.amount < 0)) ||
-    serverPurchaseOwned;
-  const unlocked = owned || serverOwned;
-  const creditBalance = myCredits?.ok === true ? myCredits.balance : null;
   const reviews = reviewsFor(c.id);
   const avg = averageRating(c.id);
   const minutes = courseMinutes(c);
   const outcomes = whatYouLearn(c);
-  const access = priced.accessModel;
   const courseComplete = pct === 100;
 
   return (
@@ -156,20 +117,18 @@ export default function CourseDetail() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <LevelBadge level={c.level} />
         <span className="chip" style={{ fontSize: 11.5, padding: "4px 11px" }}>{c.style}</span>
-        {/* Day 7 — access model chip: FREE / PAID / CREDITS / PAID+CREDITS */}
+        {/* Day 23 — every lesson is FREE: one honest chip, no price ladder */}
         <span
           className="chip"
           style={{
             fontSize: 11.5,
             padding: "4px 11px",
             fontWeight: 800,
-            ...(access === "free" ? { color: "var(--gold)", borderColor: "var(--gold-line)" } : {}),
+            color: "var(--gold)",
+            borderColor: "var(--gold-line)",
           }}
         >
-          {access === "free" && `✦ ${t("learn.access.free")}`}
-          {access === "paid" && money(priced.priceCents)}
-          {access === "credits" && `${priced.creditPrice} ✦ ${t("learn.credits")}`}
-          {access === "paid_credits" && `${money(priced.priceCents)} · ${t("learn.or")} ${priced.creditPrice} ✦`}
+          {`✦ ${t("learn.access.free")}`}
         </span>
         {avg !== null ? (
           <span className="faint" style={{ fontSize: 12.5 }}>★ {avg} · {fmt(c.enrolled)} {t("learn.enrolled")}</span>
@@ -223,82 +182,12 @@ export default function CourseDetail() {
         </button>
       </div>
 
-      {/* Day 7 — pricing architecture: FREE / PAID / CREDITS / PAID+CREDITS.
-          No fake payments: PAID shows an honest "checkout coming soon" state;
-          CREDITS are real (ledger-backed) and unlock today. */}
-      <div className="panel" style={{ padding: 16, marginBottom: 22, borderColor: unlocked || access === "free" ? "rgba(74,222,128,0.35)" : "var(--gold-line)" }}>
-        {access === "free" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <StatusPill status="pass" label={t("learn.access.free")} />
-            <span className="faint" style={{ fontSize: 12.5 }}>{t("learn.freeForever")}</span>
-          </div>
-        )}
-        {access !== "free" && (
-          <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 20 }}>
-                {access !== "credits" ? money(priced.priceCents) : ""}
-                {access === "paid_credits" && <span className="faint" style={{ fontSize: 13, fontWeight: 600 }}> {t("learn.or")} </span>}
-                {access !== "paid" && <span className="gold-text">{priced.creditPrice} ✦ {t("learn.credits")}</span>}
-              </strong>
-              <span className="faint" style={{ fontSize: 12 }}>{t("gov.buy.fees")}: {t("gov.buy.feesValue")}</span>
-            </div>
-            {unlocked ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-                <StatusPill status="pass" label={t("gov.owned")} />
-                <button className="btn btn-sm" onClick={() => nav("/settings#purchases")}>↩️ {t("gov.refund.request")}</button>
-              </div>
-            ) : (
-              <>
-                {access !== "credits" && (
-                  <button className="btn btn-primary" style={{ width: "100%", marginTop: 12 }} onClick={() => setCheckout(true)}>
-                    🛒 {t("gov.buy.confirm")} — {money(priced.priceCents)}
-                  </button>
-                )}
-                {access !== "paid" && (
-                  <button
-                    className="btn"
-                    style={{ width: "100%", marginTop: 10, borderColor: "var(--gold-line)" }}
-                    disabled={spending || creditBalance === null}
-                    onClick={async () => {
-                      if (!auth.sessionToken || creditBalance === null) return;
-                      setSpending(true);
-                      try {
-                        const r = await spendCredits({
-                          sessionToken: auth.sessionToken,
-                          amount: priced.creditPrice,
-                          courseKey: c.id,
-                        });
-                        if (r.ok) {
-                          gov.buyCourse(c.id); // client mirror (purchase terms consent flow)
-                          toast(`${t("learn.unlockedToast")} ✦`);
-                        } else if (r.error === "insufficient_credits") {
-                          toast(t("learn.err.insufficient"));
-                        } else if (r.error === "duplicate_unlock") {
-                          toast(t("learn.err.duplicate"));
-                        } else {
-                          toast(t("common.error"));
-                        }
-                      } finally {
-                        setSpending(false);
-                      }
-                    }}
-                  >
-                    {spending ? t("learn.unlocking") : `✦ ${t("learn.unlockCredits")} — ${priced.creditPrice} ${t("learn.credits")}`}
-                  </button>
-                )}
-                {creditBalance !== null && (
-                  <p className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-                    ✦ {t("learn.yourCredits")}: <strong className="gold-text">{creditBalance}</strong>
-                  </p>
-                )}
-                <p className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-                  {t("learn.checkoutSoon")} · {t("gov.buy.refundDesc")} <button onClick={() => nav("/legal/refunds")} style={{ background: "none", border: "none", color: "var(--gold)", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 11.5 }}>{t("gov.buy.refund")} →</button>
-                </p>
-              </>
-            )}
-          </>
-        )}
+      {/* Day 23 — FREE, forever: every lesson plays without payment or credits. */}
+      <div className="panel" style={{ padding: 16, marginBottom: 22, borderColor: "rgba(74,222,128,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <StatusPill status="pass" label={t("learn.access.free")} />
+          <span className="faint" style={{ fontSize: 12.5 }}>{t("learn.freeForever")}</span>
+        </div>
       </div>
 
       {/* Day 7 — completion status: live from the server progress rows */}
@@ -406,104 +295,8 @@ export default function CourseDetail() {
         )}
       </section>
 
-      {/* checkout modal — price transparency before any confirmation */}
-      {checkout && access !== "free" && (
-        <Modal open onClose={() => setCheckout(false)} title={t("gov.buy.title")}>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 4 }}>{c.title}</p>
-          {access !== "credits" && (
-            <>
-              <div style={{ borderBottom: "1px solid var(--line)", padding: "10px 0", display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                <span>{t("gov.buy.price")}</span>
-                <strong>{money(priced.priceCents)}</strong>
-              </div>
-              <div style={{ borderBottom: "1px solid var(--line)", padding: "10px 0", display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-                <span>{t("gov.buy.fees")}</span>
-                <strong>0.00 EUR</strong>
-              </div>
-            </>
-          )}
-          {access !== "paid" && (
-            <div style={{ borderBottom: "1px solid var(--line)", padding: "10px 0", display: "flex", justifyContent: "space-between", fontSize: 14 }}>
-              <span>{t("learn.unlockCredits")}</span>
-              <strong className="gold-text">{priced.creditPrice} ✦</strong>
-            </div>
-          )}
-          <div style={{ padding: "12px 0", display: "flex", justifyContent: "space-between", fontSize: 16 }}>
-            <strong>{t("gov.buy.total")}</strong>
-            <strong className="gold-text" style={{ fontSize: 18 }}>{money(priced.priceCents)}</strong>
-          </div>
-          <div className="panel" style={{ padding: 13, background: "var(--panel-2)", fontSize: 13, lineHeight: 1.7 }}>
-            <div>🎁 <strong>{t("gov.buy.get")}:</strong> {t("gov.buy.getDesc")}</div>
-            <div style={{ marginTop: 6 }}>↩️ <strong>{t("gov.buy.refund")}:</strong> {t("gov.buy.refundDesc")}</div>
-            <div style={{ marginTop: 6 }}>🏢 {t("gov.businessInfo")}: <button onClick={() => { setCheckout(false); nav("/business"); }} style={{ background: "none", border: "none", color: "var(--gold)", cursor: "pointer", padding: 0, fontSize: 12.5, fontWeight: 700 }}>densen.app/business</button></div>
-          </div>
-          <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>{t("gov.buy.terms")}</p>
-          {!auth.sessionToken && (
-            <p className="faint" style={{ fontSize: 11.5, marginTop: 6, color: "var(--gold)" }}>ℹ {t("pay.demoNote")}</p>
-          )}
-          <p className="faint" style={{ fontSize: 11.5, marginTop: 6, color: "var(--warn)" }}>⚠ {t("gov.buy.demo")}</p>
-          {buyMsg && (
-            <p className="faint" style={{ fontSize: 12, marginTop: 8, color: "var(--warn)" }}>{buyMsg}</p>
-          )}
-          <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-            <button className="btn" style={{ flex: 1 }} onClick={() => setCheckout(false)}>{t("common.cancel")}</button>
-            {auth.sessionToken ? (
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                disabled={buying}
-                onClick={async () => {
-                  setBuying(true);
-                  setBuyMsg(null);
-                  try {
-                    const r = await startPurchase({
-                      sessionToken: auth.sessionToken!,
-                      classId: c.id,
-                      seedPriceCents: priced.priceCents,
-                      seedCreditPrice: priced.creditPrice,
-                    });
-                    if (r.ok) {
-                      // Real provider session minted — hand off to the provider's
-                      // checkout page. The purchase stays pending until the
-                      // provider's verified event confirms payment.
-                      setCheckout(false);
-                      toast(t("pay.startCheckout"));
-                      window.location.href = r.checkoutUrl;
-                    } else {
-                      // Honest failure mapping — nothing is ever marked paid here.
-                      if (r.error === "provider_not_configured") setBuyMsg(t("pay.err.provider_not_configured"));
-                      else if (r.error === "already_owned") setBuyMsg(t("pay.err.already_owned"));
-                      else if (r.error === "already_pending") setBuyMsg(t("pay.err.already_pending"));
-                      else if (r.error === "unauthenticated") setBuyMsg(t("pay.err.unauthenticated"));
-                      else if (r.error === "free_class" || r.error === "not_purchasable") setBuyMsg(t("common.error"));
-                      else setBuyMsg(t("common.error"));
-                    }
-                  } finally {
-                    setBuying(false);
-                  }
-                }}
-              >
-                {buying ? "…" : `🛒 ${t("pay.startCheckout")}${access !== "credits" ? ` · ${money(priced.priceCents)}` : ""}`}
-              </button>
-            ) : (
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  gov.buyCourse(c.id);
-                  setCheckout(false);
-                  toast(t("gov.buy.done"));
-                }}
-              >
-                {t("gov.buy.confirm")}{access !== "credits" ? ` · ${money(priced.priceCents)}` : ""}
-              </button>
-            )}
-          </div>
-        </Modal>
-      )}
-
       {/* review composer — genuine UGC only, one per dancer */}
-      {access === "free" && <ReviewComposer courseId={c.id} />}
+      <ReviewComposer courseId={c.id} />
     </Page>
   );
 }
@@ -511,7 +304,7 @@ export default function CourseDetail() {
 function ReviewComposer({ courseId }: { courseId: string }) {
   const { t } = useStore();
   const { addReview, reviews, toast } = useGov();
-  const already = reviews.some((r) => r.courseId === courseId);
+  const already = reviews.some((r: { courseId: string }) => r.courseId === courseId);
   const [rating, setRating] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
   const [text, setText] = useState("");
   if (already) return null;
@@ -548,5 +341,3 @@ function ReviewComposer({ courseId }: { courseId: string }) {
     </section>
   );
 }
-// refundStatusNote remains available for purchase rows rendered in Settings
-void refundStatusNote;

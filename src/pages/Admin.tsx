@@ -17,7 +17,6 @@ import {
 import {
   CONSENT_LABELS,
   DATA_INVENTORY,
-  money,
   collectMarketedStrings,
   contrastAudit,
   scanClaims,
@@ -371,19 +370,7 @@ export default function Admin() {
 
           {tab === "requests" && (
             <div style={{ display: "grid", gap: 12 }}>
-              <div className="panel" style={{ padding: 16 }}>
-                <h2 style={{ fontSize: 15, marginBottom: 10 }}>↩️ {t("gov.admin.refundQueue")}</h2>
-                {gov.refunds.length === 0 ? <p className="faint" style={{ fontSize: 13 }}>—</p> : gov.refunds.map((r) => (
-                  <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
-                    <strong style={{ fontSize: 13 }}>{gov.purchases.find((p) => p.id === r.purchaseId)?.title ?? r.purchaseId}</strong>
-                    <StatusPill status={r.status === "refunded" ? "pass" : r.status === "rejected" ? "action_required" : "warning"} label={t(("gov.refund." + r.status) as never)} />
-                    <span className="faint" style={{ fontSize: 12, flex: 1 }}>{r.reason}</span>
-                    {r.status !== "refunded" && r.status !== "rejected" && (
-                      <button className="btn btn-sm" onClick={() => gov.advanceRefund(r.id, true)}>→</button>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {/* Day 23 — refund queue removed with the free platform. */}
               <div className="panel" style={{ padding: 16 }}>
                 <h2 style={{ fontSize: 15, marginBottom: 10 }}>🗑️ {t("gov.admin.deletionQueue")}</h2>
                 {gov.deletion ? (
@@ -474,7 +461,6 @@ export default function Admin() {
 
           {tab === "revenue" && (
             <>
-              <RefundQueue sessionToken={auth.sessionToken} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
                 <StatCard icon="💰" value="€84,120" label="MRR" accent />
                 <StatCard icon="💳" value="24,890" label={t("admin.subscriptions")} />
@@ -497,7 +483,7 @@ export default function Admin() {
                   </div>
                 ))}
                 <p className="faint" style={{ fontSize: 12, marginTop: 10 }}>
-                  {t("gov.buy.demo")} · {money(800)} {t("gov.buy.fees")}: 0.00 EUR
+                  ✦ {t("learn.freeForever")}
                 </p>
               </div>
             </>
@@ -809,87 +795,7 @@ interface AdminDispute {
 
 /* ==================== 14: REFUND QUEUE (staff) ==================== */
 
-const REFUND_REQUEST_REASON_LABELS: Record<string, { en: string; sq: string }> = {
-  duplicate_purchase: { en: "Duplicate purchase", sq: "Blerje e dyfishtë" },
-  accidental_purchase: { en: "Accidental purchase", sq: "Blerje aksidentale" },
-  content_not_as_described: { en: "Content not as described", sq: "Përmbajtja nuk përputhej me përshkrimin" },
-  technical_issue: { en: "Technical issue", sq: "Problem teknik" },
-  other: { en: "Other", sq: "Tjetër" },
-};
-
-/**
- * Day 14 — staff refund queue over the REAL refundRequests ledger.
- * Approving moves the request toward the provider; the money itself moves
- * only when the provider's refund event lands. Rejecting needs no provider.
- */
-function RefundQueue({ sessionToken }: { sessionToken: string | null }) {
-  const { t, lang, toast } = useStore();
-  const queue = useQuery(
-    api.paymentsWire.adminRefundQueue,
-    sessionToken ? ({ sessionToken } as never) : "skip"
-  );
-  const review = useMutation(api.paymentsWire.reviewRefundRequest);
-
-  if (!sessionToken) {
-    return (
-      <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
-        <h2 style={{ fontSize: 15, marginBottom: 8 }}>↩️ Refund queue</h2>
-        <p className="faint" style={{ fontSize: 12.5, margin: 0 }}>Sign in as staff to review refund requests.</p>
-      </div>
-  );
-  }
-  const rows = queue && typeof queue === "object" && "ok" in queue && queue.ok ? queue.queue : [];
-  return (
-    <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
-      <h2 style={{ fontSize: 15, marginBottom: 8 }}>↩️ Refund queue ({rows.length})</h2>
-      <p className="faint" style={{ fontSize: 12, marginBottom: 10 }}>
-        Approving queues the refund with the payment provider — money moves only on the provider's confirmed refund event.
-      </p>
-      {rows.length === 0 && <p className="faint" style={{ fontSize: 13 }}>—</p>}
-      {rows.map((r: { id: string; userId: string; reason: string; status: string; detail?: string; purchaseId: string; amountCents?: number; currency?: string; createdAt: number }) => (
-        <div key={r.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <StatusPill
-              status={r.status === "refunded" || r.status === "approved" ? "pass" : r.status === "rejected" ? "action_required" : "warning"}
-              label={r.status.replace("_", " ")}
-            />
-            <strong style={{ fontSize: 13 }}>
-              {r.amountCents !== undefined ? money(r.amountCents, r.currency ?? "EUR") : "—"}
-            </strong>
-            <span style={{ fontSize: 12.5 }}>{tx(REFUND_REQUEST_REASON_LABELS[r.reason] ?? { en: r.reason, sq: r.reason }, lang)}</span>
-            <span className="faint" style={{ fontSize: 11.5 }}>{new Date(r.createdAt).toLocaleString()}</span>
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            {r.status === "requested" && (
-              <button
-                className="btn btn-sm"
-                onClick={() => void review({ sessionToken: sessionToken!, refundId: r.id, approve: true }).catch(() => toast(t("common.error")))}
-              >
-                🔍 Review
-              </button>
-            )}
-            {(r.status === "requested" || r.status === "under_review") && (
-              <>
-                <button
-                  className="btn btn-sm btn-primary"
-                  onClick={() => void review({ sessionToken: sessionToken!, refundId: r.id, approve: true }).catch(() => toast(t("common.error")))}
-                >
-                  ✓ Approve → provider
-                </button>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => void review({ sessionToken: sessionToken!, refundId: r.id, approve: false }).catch(() => toast(t("common.error")))}
-                >
-                  ✕ Reject
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+/* Day 23 — staff refund queue removed with the free platform. */
 
 function CopyrightDashboard({ sessionToken }: { sessionToken: string | null }) {
   const { lang } = useStore();

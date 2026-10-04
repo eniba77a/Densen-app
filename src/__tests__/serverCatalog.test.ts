@@ -88,16 +88,18 @@ describe("serverClassToCourse", () => {
   });
 });
 
-describe("pricingFromRow", () => {
-  it("derives the same access ladder the server enforces", () => {
-    expect(pricingFromRow({ priceCents: 0, creditPrice: 0 }).accessModel).toBe("free");
-    expect(pricingFromRow({ priceCents: 800, creditPrice: 0 }).accessModel).toBe("paid");
-    expect(pricingFromRow({ priceCents: 0, creditPrice: 60 }).accessModel).toBe("credits");
-    expect(pricingFromRow({ priceCents: 800, creditPrice: 80 }).accessModel).toBe("paid_credits");
+describe("pricingFromRow (Day 23: free platform)", () => {
+  it("resolves EVERY row to free — legacy price fields no longer gate anything", () => {
+    expect(pricingFromRow({ priceCents: 0, creditPrice: 0 })).toEqual({ accessModel: "free", priceCents: 0, creditPrice: 0 });
+    expect(pricingFromRow({ priceCents: 800, creditPrice: 0 }).accessModel).toBe("free");
+    expect(pricingFromRow({ priceCents: 0, creditPrice: 60 }).accessModel).toBe("free");
+    expect(pricingFromRow({ priceCents: 800, creditPrice: 80 }).accessModel).toBe("free");
+    expect(pricingFromRow({ priceCents: 800, creditPrice: 80 }).priceCents).toBe(0);
+    expect(pricingFromRow({ priceCents: 800, creditPrice: 80 }).creditPrice).toBe(0);
   });
 
-  it("keeps the row's own numbers", () => {
-    expect(pricingFromRow(classRow)).toEqual({ accessModel: "credits", priceCents: 0, creditPrice: 60 });
+  it("keeps historical rows free in the catalog projection", () => {
+    expect(pricingFromRow(classRow)).toEqual({ accessModel: "free", priceCents: 0, creditPrice: 0 });
   });
 });
 

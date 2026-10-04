@@ -157,6 +157,9 @@ function Shell() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/studio" element={<Studio />} />
+          {/* Day 23 — Teacher Mode destinations: My Lessons + Create */}
+          <Route path="/studio/lessons" element={<Studio initialView="lessons" />} />
+          <Route path="/studio/new" element={<Studio initialNew="class" />} />
           <Route path="/audio" element={<Audio />} />
           <Route path="/legal/:docId" element={<LegalPage />} />
           <Route path="/privacy" element={<PrivacyRoute />} />

@@ -1,11 +1,17 @@
 /**
- * DENSEN — Teacher Studio wire layer (Day 8).
- * ===========================================
+ * DENSEN — Teacher Studio wire layer (Day 8, Day 23 update).
+ * ==========================================================
  * Every call re-derives identity from the SESSION TOKEN and re-runs the
  * `studio.ts` decision core. Nothing below trusts client-asserted identity,
- * role, or ownership. Money is never invented: purchases accrue to
- * `teacherPayouts` only when a real provider confirms payment (future wiring
- * point marked inline); the studio Revenue section is read-only truth.
+ * role, or ownership.
+ *
+ * Day 23 — FREE PLATFORM: the platform no longer sells anything. Every
+ * create/update coerces the item to priceCents 0 / creditPrice 0 (no paid
+ * content can be created anymore) and legacy purchase-derived "student"
+ * counts were replaced with real lesson-engagement counts from
+ * `lessonProgress`. New capabilities: item deletion (owner/admin), optional
+ * teacher movement timestamps (`steps`), and uploaded lesson-video refs
+ * (ownership-checked against the `videos` table).
  */
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
@@ -15,6 +21,7 @@ import {
   decidePublishTransition,
   decideStudioAccess,
   decideStudioEdit,
+  normalizeSteps,
   splitRevenue,
   validateStudioItem,
   MAX_TITLE,
@@ -83,13 +90,28 @@ function validateArgs(args: any) {
     style: args.style,
     difficulty: args.difficulty,
     durationSec: args.durationSec,
-    priceCents: args.priceCents,
-    creditPrice: args.creditPrice,
+    priceCents: 0, // Day 23: free platform — pricing is coerced before validation
+    creditPrice: 0,
     tags: args.tags,
     visibility: args.visibility,
     kind: args.kind,
     ...(args.kind === "challenge" ? { deadlineAt: args.deadlineAt } : {}),
   });
+}
+
+/**
+ * Day 23 — uploaded-video reference guard. `videoRef` must point at a row of
+ * the `videos` table the CALLER owns and that finished processing (or be a
+ * legacy http(s) URL). Prevents grafting someone else's upload onto your
+ * lesson and prevents half-uploaded assets from being published.
+ */
+async function videoRefError(ctx: StudioCtx, videoRef: string | undefined, userId: string): Promise<string | null> {
+  if (!videoRef) return null;
+  if (/^https?:\/\//i.test(videoRef)) return null; // legacy external URL passthrough
+  const v = (await ctx.db.get(videoRef as never)) as { ownerUserId?: string; processingStatus?: string } | null;
+  if (!v || v.ownerUserId !== userId) return "video_not_owned";
+  if ((v.processingStatus ?? "ready") !== "ready") return "video_not_ready";
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -120,6 +142,7 @@ export const createStudioItem = mutationGeneric({
     thumbnailRef: v.optional(v.string()),
     deadlineAt: v.optional(v.number()), // challenges only
     comboMoveIds: v.optional(v.array(v.id("moves"))), // combos only
+    steps: v.optional(v.array(v.object({ label: v.string(), atSec: v.number() }))), // Day 23 teacher timestamps
   },
   handler: async (ctx: StudioCtx, args: any) => {
     const now = Date.now();
@@ -127,8 +150,21 @@ export const createStudioItem = mutationGeneric({
     if (!s) return { ok: false as const, error: "unauthenticated" as const };
     if (s.denied) return { ok: false as const, error: s.denied };
 
+    // Day 23 — FREE PLATFORM: client-sent pricing is ignored; every new item
+    // is free. Old rows keep their legacy price fields as historical data.
+    args.priceCents = 0;
+    args.creditPrice = 0;
+
     const check = validateArgs(args);
     if (!check.ok) return { ok: false as const, error: check.error };
+
+    // Day 23 — optional movement timestamps (validated + chronologically sorted).
+    const stepsVal = normalizeSteps(args.steps);
+    if (!stepsVal.ok) return { ok: false as const, error: stepsVal.error };
+
+    // Day 23 — uploaded videos must belong to the caller and be ready.
+    const vidErr = await videoRefError(ctx, args.videoRef, s.caller.userId);
+    if (vidErr) return { ok: false as const, error: vidErr as never };
 
     const teacherId = s.caller.userId;
     const base = { ...itemFields(args), teacherId };
@@ -171,6 +207,7 @@ export const createStudioItem = mutationGeneric({
         status: "draft" as never,
         createdAt: now,
         ...itemFields(args),
+        steps: stepsVal.steps.length > 0 ? stepsVal.steps : undefined,
         coverUrl: args.thumbnailRef ?? "",
         altText: `Class cover for ${args.title.trim()}`,
         updatedAt: now,
@@ -262,6 +299,7 @@ export const updateStudioItem = mutationGeneric({
     thumbnailRef: v.optional(v.string()),
     deadlineAt: v.optional(v.number()),
     comboMoveIds: v.optional(v.array(v.id("moves"))),
+    steps: v.optional(v.array(v.object({ label: v.string(), atSec: v.number() }))), // Day 23 teacher timestamps
   },
   handler: async (ctx: StudioCtx, args: any) => {
     const now = Date.now();
@@ -269,12 +307,35 @@ export const updateStudioItem = mutationGeneric({
     if (!s) return { ok: false as const, error: "unauthenticated" as const };
     if (s.denied) return { ok: false as const, error: s.denied };
 
+    // Day 23 — FREE PLATFORM: pricing is coerced to free on every update too.
+    args.priceCents = 0;
+    args.creditPrice = 0;
+
     const check = validateArgs(args);
     if (!check.ok) return { ok: false as const, error: check.error };
+
+    // Day 23 — movement timestamps: "absent" keeps the stored value so a
+    // plain text edit never silently wipes the teacher's timestamps; an
+    // explicitly EMPTY array clears them (the UI always sends the full list
+    // for class edits).
+    let steps: { label: string; atSec: number }[] | undefined;
+    let stepsTouched = false;
+    if (args.steps !== undefined) {
+      stepsTouched = true;
+      const stepsVal = normalizeSteps(args.steps);
+      if (!stepsVal.ok) return { ok: false as const, error: stepsVal.error };
+      steps = stepsVal.steps.length > 0 ? stepsVal.steps : undefined;
+    }
 
     const loaded = await loadOwnedItem(ctx, s, args.kind as StudioKind, args.itemId);
     if ("error" in loaded) return { ok: false as const, error: loaded.error };
 
+    // Day 23 — video guard only when the ref CHANGES (legacy refs re-validate
+    // against the same rules they were written under).
+    if (args.videoRef !== undefined && args.videoRef !== (loaded.row as { videoRef?: string }).videoRef) {
+      const vidErr = await videoRefError(ctx, args.videoRef, s.caller.userId);
+      if (vidErr) return { ok: false as const, error: vidErr as never };
+    }
     if (args.kind === "move") {
       await ctx.db.patch(loaded.row._id as never, { name: args.title.trim(), ...itemFields(args) });
     } else if (args.kind === "combo") {
@@ -290,6 +351,7 @@ export const updateStudioItem = mutationGeneric({
       await ctx.db.patch(loaded.row._id as never, {
         title: args.title.trim(),
         ...itemFields(args),
+        ...(args.kind === "class" && stepsTouched ? { steps } : {}),
         coverUrl: args.thumbnailRef ?? loaded.row.coverUrl ?? "",
       });
     } else {
@@ -369,6 +431,64 @@ export const transitionStudioItem = mutationGeneric({
 /*                          studio queries                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Day 23 — delete one of the teacher's OWN items. Same ownership rule as
+ * edit (`decideStudioEdit` inside loadOwnedItem: owner or admin). For a
+ * course, its lesson rows and the per-user progress rows tied to them are
+ * removed with it (dependent data of the deleted content). Every deletion
+ * is audit-logged.
+ */
+export const deleteStudioItem = mutationGeneric({
+  args: {
+    sessionToken: v.string(),
+    kind: v.union(
+      v.literal("move"),
+      v.literal("combo"),
+      v.literal("choreography"),
+      v.literal("class"),
+      v.literal("course"),
+      v.literal("challenge")
+    ),
+    itemId: v.string(),
+  },
+  handler: async (ctx: StudioCtx, args: any) => {
+    const now = Date.now();
+    const s = await studioCaller(ctx.db, args.sessionToken);
+    if (!s) return { ok: false as const, error: "unauthenticated" as const };
+    if (s.denied) return { ok: false as const, error: s.denied };
+
+    const loaded = await loadOwnedItem(ctx, s, args.kind as StudioKind, args.itemId);
+    if ("error" in loaded) return { ok: false as const, error: loaded.error };
+
+    // Course kind: remove the course's lessons + the per-user progress rows
+    // tied to it (dependent state of the deleted content).
+    if (args.kind === "course") {
+      const lessons = (await ctx.db
+        .query("lessons")
+        .withIndex("by_course_pos", (q: any) => q.eq("courseId", args.itemId))
+        .collect()) as { _id: string }[];
+      const progress = (await ctx.db
+        .query("lessonProgress")
+        .withIndex("by_course", (q: any) => q.eq("courseKey", args.itemId))
+        .collect()) as { _id: string }[];
+      for (const p of progress) await ctx.db.delete(p._id as never);
+      for (const l of lessons) await ctx.db.delete(l._id as never);
+    }
+
+    await ctx.db.delete(loaded.row._id as never);
+    await ctx.db.insert("auditLogs", {
+      actorUserId: s.caller.userId as never,
+      actorRole: s.caller.role,
+      eventType: "content_event",
+      targetType: args.kind,
+      targetId: args.itemId,
+      summary: `studio_delete_${args.kind}`,
+      createdAt: now,
+    });
+    return { ok: true as const };
+  },
+});
+
 function projectItem(row: any, kind: StudioKind) {
   const status: string = row.studioStatus ?? row.status ?? "draft";
   return {
@@ -379,12 +499,13 @@ function projectItem(row: any, kind: StudioKind) {
     style: row.style ?? "",
     difficulty: row.difficulty ?? "beginner",
     durationSec: row.durationSec ?? 0,
-    priceCents: row.priceCents ?? 0,
-    creditPrice: row.creditPrice ?? 0,
+    priceCents: 0, // Day 23: free platform — the legacy fields are no longer surfaced
+    creditPrice: 0,
     tags: row.tags ?? [],
     visibility: row.visibility ?? "private",
     videoRef: row.videoRef ?? row.breakdownUrl ?? undefined,
     thumbnailRef: row.thumbnailRef ?? undefined,
+    steps: row.steps ?? [],
     status: status === "in_review" ? "draft" : status === "removed" ? "unpublished" : status,
     deadlineAt: row.deadlineAt,
     updatedAt: row.updatedAt ?? row.createdAt,
@@ -421,7 +542,22 @@ export const listMyItems = queryGeneric({
       for (const r of rows) out.push(projectItem(r, k));
     }
     out.sort((a, b) => b.updatedAt - a.updatedAt);
-    return { ok: true as const, items: out };
+
+    // Day 23 — resolve playable URLs for the teacher's own uploaded videos
+    // (preview before publish). Owner-only query, so no extra gate needed.
+    const items = [] as (ReturnType<typeof projectItem> & { videoUrl?: string })[];
+    for (const it of out) {
+      if (it.videoRef && !/^https?:\/\//i.test(it.videoRef)) {
+        const v = (await ctx.db.get(it.videoRef as never)) as { storageRef?: string } | null;
+        const url = v?.storageRef ? await ctx.storage?.getUrl?.(v.storageRef as never) : undefined;
+        items.push({ ...it, videoUrl: typeof url === "string" ? url : undefined });
+      } else if (it.videoRef) {
+        items.push({ ...it, videoUrl: it.videoRef });
+      } else {
+        items.push(it);
+      }
+    }
+    return { ok: true as const, items };
   },
 });
 
@@ -454,14 +590,24 @@ export const getStudioOverview = queryGeneric({
         else counts.drafts++;
       }
     }
-    // Students = distinct buyers of my paid courses (real entitlement rows only).
+    // Day 23 — Students = distinct LEARNERS of my courses/classes, counted
+    // from real lesson engagement (lessonProgress). The old purchase-based
+    // count died with the payment system; engagement is the honest metric.
     const myCourses = (await ctx.db
       .query("courses")
       .withIndex("by_teacher", (q: any) => q.eq("teacherId", s.caller.userId))
       .collect()) as any[];
-    for (const c of myCourses) {
-      const purchases = (await ctx.db.query("purchases").withIndex("by_user_course", (q: any) => q.eq("courseId", c._id)).collect()) as any[];
-      for (const p of purchases) if (p.status === "paid") studentsSet.add(p.userId);
+    const myClasses = (await ctx.db
+      .query("classes")
+      .withIndex("by_teacher", (q: any) => q.eq("teacherId", s.caller.userId))
+      .collect()) as any[];
+    const contentIds = [...myCourses.map((c) => c._id as string), ...myClasses.map((c) => c._id as string)];
+    for (const cid of contentIds) {
+      const learners = (await ctx.db
+        .query("lessonProgress")
+        .withIndex("by_course", (q: any) => q.eq("courseKey", cid))
+        .collect()) as { userId: string }[];
+      for (const l of learners) studentsSet.add(l.userId);
     }
     const students = studentsSet.size;
     studentsSet = new Set();
@@ -530,9 +676,14 @@ export const getAnalytics = queryGeneric({
       .query("classes")
       .withIndex("by_teacher", (q: any) => q.eq("teacherId", s.caller.userId))
       .collect()) as any[];
+    // Day 23 — learners = real lesson engagement across my courses (the old
+    // purchase-count metric is gone with the payment system).
     let enrollments = 0;
     for (const c of myCourses) {
-      enrollments += ((await ctx.db.query("purchases").withIndex("by_user_course", (q: any) => q.eq("courseId", c._id)).collect()) as any[]).length;
+      enrollments += ((await ctx.db
+        .query("lessonProgress")
+        .withIndex("by_course", (q: any) => q.eq("courseKey", c._id))
+        .collect()) as unknown[]).length;
     }
     const myPosts = (await ctx.db
       .query("posts")
@@ -587,6 +738,7 @@ export const createCourseLesson = mutationGeneric({
     durationSec: v.number(),
     xpReward: v.optional(v.number()),
     videoRef: v.optional(v.string()),
+    steps: v.optional(v.array(v.object({ label: v.string(), atSec: v.number() }))), // Day 23
   },
   handler: async (ctx: StudioCtx, args: any) => {
     const now = Date.now();
@@ -601,6 +753,12 @@ export const createCourseLesson = mutationGeneric({
     if (!Number.isFinite(args.durationSec) || args.durationSec <= 0 || args.durationSec > 4 * 3600)
       return { ok: false as const, error: "duration_invalid" as const };
 
+    // Day 23 — movement timestamps + uploaded-video ownership.
+    const stepsVal = normalizeSteps(args.steps);
+    if (!stepsVal.ok) return { ok: false as const, error: stepsVal.error as never };
+    const vidErr = await videoRefError(ctx, args.videoRef, s.caller.userId);
+    if (vidErr) return { ok: false as const, error: vidErr as never };
+
     const existing = (await ctx.db
       .query("lessons")
       .withIndex("by_course_pos", (q: any) => q.eq("courseId", args.courseId))
@@ -614,6 +772,7 @@ export const createCourseLesson = mutationGeneric({
       title,
       description: args.description?.trim() || undefined,
       videoRef: args.videoRef,
+      steps: stepsVal.steps.length > 0 ? stepsVal.steps : undefined,
       durationSec: Math.round(args.durationSec),
       xpReward: Math.max(0, Math.min(500, Math.round(args.xpReward ?? 150))),
       status: "published" as never, // course-gated visibility
@@ -656,6 +815,8 @@ export const listCourseLessons = queryGeneric({
         description: l.description,
         durationSec: l.durationSec,
         xpReward: l.xpReward,
+        videoRef: l.videoRef ?? undefined,
+        steps: l.steps ?? [],
       })),
     };
   },

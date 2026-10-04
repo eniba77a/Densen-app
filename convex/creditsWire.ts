@@ -1,27 +1,31 @@
 /**
- * DENSEN — Dance Credits wire functions (Day 10).
- * ===============================================
- * Credits are the platform reward currency (never money, never a credit
- * score). Every balance change is one signed row in `creditTransactions`
+ * DENSEN — Dance Credits wire functions (Day 10, Day 23 update).
+ * ==============================================================
+ * Credits are the platform loyalty currency for REWARDS only. Day 23 made
+ * Densen a completely free platform: the credit-SPEND (class unlock) path
+ * was removed — no lesson is ever gated behind credits or money. Credits
+ * remain a no-cash loyalty ledger (earn/reward/admin-adjust), exactly like
+ * XP. Every balance change is one signed row in `creditTransactions`
  * (source of truth) plus the denormalized `profiles.creditBalance` patched
  * in the SAME mutation (schema invariant). Convex mutations are
- * serializable transactions, so balance checks + writes are atomic —
- * negative balances and concurrent double-spends are structurally
+ * serializable transactions, so concurrent double-writes are structurally
  * impossible.
  *
  * Surfaces:
  *  - earnCredit (INTERNAL): called from the server's own verified flows.
  *    There is deliberately NO public earn endpoint — clients cannot mint.
- *  - spendCredits: unlock a class with credits; replay-safe via the
- *    ledger's (user, reason, refId) idempotency probe.
  *  - getMyCredits: reactive balance + history (own data only).
  *  - adminAdjustCredits: admin-only, reason required, audit-logged.
  *  - fixCreditBalance: self-heal the denormalized balance from the ledger.
+ *
+ * REMOVED (Day 23): `spendCredits` — the credit-unlock purchase path. The
+ * ledger keeps every historical row for transparency, but nothing spends
+ * credits anymore and no lesson access depends on them.
  */
 import { v } from "convex/values";
 import { mutationGeneric, queryGeneric, internalMutationGeneric } from "convex/server";
 import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
-import { decideAdminAdjust, decideCreditSpend, type CreditSource } from "./credits";
+import { decideAdminAdjust, type CreditSource } from "./credits";
 import {
   appendCreditTx,
   currentBalance,
@@ -51,56 +55,6 @@ export const earnCredit = internalMutationGeneric({
     const pay = await earnCreditsFor(ctx.db, args.userId, args.source as CreditSource, args.refId, Date.now());
     if (pay.error) return { ok: false as const, error: pay.error as never, credits: 0 };
     return { ok: true as const, credits: pay.granted };
-  },
-});
-
-/* ---------------- spend (class unlock) ---------------- */
-
-/**
- * Spend credits to unlock a class/course. Replay-safe: the unlock record
- * is a ledger row with reason "spend" and refId `class:<key>` — a replay
- * hits the same probe and returns `duplicate_unlock` instead of double-
- * spending. The amount is caller-supplied for seed-catalog classes
- * (their pricing lives in the client catalog); Studio-published classes
- * could resolve it server-side — the refId probe keeps either path
- * idempotent. Balance goes negative only if the invariant was already
- * broken; the decision core forbids it from a healthy balance.
- */
-export const spendCredits = mutationGeneric({
-  args: {
-    sessionToken: v.string(),
-    amount: v.number(),
-    courseKey: v.optional(v.string()),
-  },
-  handler: async (ctx: GenericMutationCtx<any>, args: { sessionToken: string; amount: number; courseKey?: string }) => {
-    const now = Date.now();
-    const db = ctx.db;
-    const c = await callerFromToken(db, args.sessionToken);
-    if (!c) return { ok: false as const, error: "unauthenticated" as const };
-
-    const refId = args.courseKey ? `class:${args.courseKey}` : undefined;
-
-    // Replay probe — an already-recorded unlock never charges twice.
-    if (refId) {
-      const dup = (await db
-        .query("creditTransactions")
-        .withIndex("by_user_reason_ref", (q: any) =>
-          q.eq("userId", c.userId).eq("reason", "spend").eq("refId", refId)
-        )
-        .first()) as unknown;
-      if (dup !== null) return { ok: false as const, error: "duplicate_unlock" as const };
-    }
-
-    const balance = await currentBalance(db, c.userId);
-    const decision = decideCreditSpend({ balance, amount: args.amount });
-    if (decision.action === "deny")
-      return { ok: false as const, error: decision.error as "insufficient_credits" | "invalid_amount" };
-
-    await appendCreditTx(
-      db, c.userId, -args.amount, "spend", args.courseKey ? "class" : "manual",
-      refId, decision.balanceAfter, now
-    );
-    return { ok: true as const, balance: decision.balanceAfter };
   },
 });
 

@@ -12,7 +12,6 @@ import {
   CONTENT_TYPE_META,
   FREE_TRACK,
   LEARN_CATEGORIES,
-  isFreeTrack,
   courseMinutes,
   type ContentType,
 } from "../data/learning";
@@ -275,11 +274,10 @@ export default function Learn() {
                 <span className="chip" style={{ position: "absolute", top: 10, left: 10, fontSize: 11, padding: "4px 10px", background: "rgba(10,12,16,0.7)" }}>
                   {c.style}
                 </span>
-                {isFreeTrack(c.id) && (
-                  <span style={{ position: "absolute", bottom: 10, left: 10, background: "rgba(227,179,65,0.95)", color: "#171204", fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 999 }}>
-                    {t("learn.access.free")}
-                  </span>
-                )}
+                {/* Day 23 — every lesson is free: the badge is unconditional */}
+                <span style={{ position: "absolute", bottom: 10, left: 10, background: "rgba(227,179,65,0.95)", color: "#171204", fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 999 }}>
+                  {t("learn.access.free")}
+                </span>
                 {c.isNew && (
                   <span style={{ position: "absolute", top: 10, right: 10, background: "var(--gold)", color: "#131007", fontSize: 10.5, fontWeight: 800, padding: "4px 9px", borderRadius: 999 }}>
                     {t("common.new")}

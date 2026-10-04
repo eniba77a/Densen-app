@@ -1,25 +1,34 @@
 /**
- * DENSEN — Teacher Studio (Day 8).
- * ================================
+ * DENSEN — Teacher Studio (Day 8, Day 23 Teacher Mode core).
+ * ==========================================================
  * The publishing home for VERIFIED teachers only. Access is decided by the
  * server core (`studio.ts`) against the session token + teacherProfiles row —
- * the UI's gate is a mirror, never the authority. Nine sections:
- * Dashboard · Moves · Combos · Choreographies · Classes · Courses ·
- * Challenges · Students · Analytics · Revenue.
+ * the UI's gate is a mirror, never the authority. Sections:
+ * Dashboard · My Lessons (merged) · Moves · Combos · Choreographies ·
+ * Classes · Courses · Challenges · Students · Analytics.
  *
- * Create/update flows cover the six kinds with every Day 8 field: title,
- * description, video/thumbnail refs, style, difficulty, duration, price,
- * free/paid, credit unlock, tags, visibility. Items start as DRAFT and move
- * through PUBLISHED → UNPUBLISHED via server-validated transitions.
- * Revenue shows real accrual truth only — DENSEN never invents money.
+ * Day 23 — FREE PLATFORM: no price, no credit unlock, no revenue tab. Every
+ * lesson is free. New capabilities: real video upload (Day 4 pipeline) with
+ * preview-before-publish, optional teacher movement timestamps, delete for
+ * the teacher's OWN items, and Draft/Published states with honest upload
+ * progress (Preparing/Uploading/Processing/Failed).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
+import { useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Page, StatCard, Empty, LevelBadge } from "../components/ui";
 import { useAuth } from "../state/auth";
 import { useT, type TKey } from "../i18n";
 import { useStore } from "../state/store";
+import {
+  precheckVideoFile,
+  probeVideoDuration,
+  uploadDanceVideo,
+  type UploadErrorCode,
+  type UploadStage,
+} from "../lib/videoUpload";
+import { tx } from "../components/gov-ui";
 
 /* ---------------- studio vocabulary (mirror of convex/studio.ts) ---------------- */
 
@@ -46,13 +55,6 @@ const KIND_KEY: Record<StudioKind, TKey> = {
   challenge: "studio.tab.challenges",
 };
 
-const ACCESS_KEY: Record<string, TKey> = {
-  free: "studio.access_free",
-  paid: "studio.access_paid",
-  credits: "studio.access_credits",
-  paid_credits: "studio.access_paid_credits",
-};
-
 const STATUS_KEY: Record<StudioStatus, TKey> = {
   draft: "studio.status_draft",
   published: "studio.status_published",
@@ -61,11 +63,13 @@ const STATUS_KEY: Record<StudioStatus, TKey> = {
 
 const STYLES = ["Beginner", "Hip-Hop", "Commercial", "Contemporary", "Jazz", "Latin", "Kids", "Teens", "Advanced", "Professional"];
 
-const accessModelOf = (p: { priceCents: number; creditPrice: number }): string =>
-  p.priceCents <= 0 && p.creditPrice <= 0 ? "free" : p.priceCents > 0 && p.creditPrice > 0 ? "paid_credits" : p.priceCents > 0 ? "paid" : "credits";
-
 const fmtDur = (sec: number) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
-const fmtEur = (cents: number) => `€${(cents / 100).toFixed(2)}`;
+
+/** A teacher movement timestamp (Practice Mode seeks to atSec). */
+interface StepDraft {
+  label: string;
+  atSec: number;
+}
 
 interface StudioItem {
   id: string;
@@ -75,24 +79,26 @@ interface StudioItem {
   style: string;
   difficulty: string;
   durationSec: number;
-  priceCents: number;
-  creditPrice: number;
   tags: string[];
   visibility: string;
+  videoRef?: string;
+  thumbnailRef?: string;
+  videoUrl?: string;
+  steps: StepDraft[];
   status: StudioStatus;
   deadlineAt?: number;
   updatedAt: number;
 }
 
-type Tab = "dashboard" | StudioKind | "students" | "analytics" | "revenue";
+type Tab = "dashboard" | "lessons" | StudioKind | "students" | "analytics";
 
 /* ------------------------------------------------------------------ */
 
-export default function Studio() {
+export default function Studio({ initialView, initialNew }: { initialView?: "lessons"; initialNew?: StudioKind }) {
   const { t } = useT();
   const { sessionToken, viewer, loading } = useAuth();
-  const [tab, setTab] = useState<Tab>("dashboard");
-  const [creating, setCreating] = useState<StudioKind | null>(null);
+  const [tab, setTab] = useState<Tab>(initialView === "lessons" ? "lessons" : initialNew ? initialNew : "dashboard");
+  const [creating, setCreating] = useState<StudioKind | null>(initialNew ?? null);
   const [editing, setEditing] = useState<StudioItem | null>(null);
 
   const access = useQuery(
@@ -127,16 +133,16 @@ export default function Studio() {
 
   const counts = access && "ok" in access && access.ok ? access.counts : null;
   const tabs: { id: Tab; label: string }[] = [
-    { id: "dashboard", label: t("studio.tab.dashboard") },
+    { id: "dashboard", label: t("nav.dashboard") },
+    { id: "lessons", label: t("nav.myLessons") },
+    { id: "class", label: t("studio.tab.classes") },
+    { id: "course", label: t("studio.tab.courses") },
     { id: "move", label: t("studio.tab.moves") },
     { id: "combo", label: t("studio.tab.combos") },
     { id: "choreography", label: t("studio.tab.choreos") },
-    { id: "class", label: t("studio.tab.classes") },
-    { id: "course", label: t("studio.tab.courses") },
     { id: "challenge", label: t("studio.tab.challenges") },
     { id: "students", label: t("studio.tab.students") },
     { id: "analytics", label: t("studio.tab.analytics") },
-    { id: "revenue", label: t("studio.tab.revenue") },
   ];
 
   return (
@@ -167,6 +173,10 @@ export default function Studio() {
         <Dashboard counts={counts} students={access && "ok" in access && access.ok ? access.students : 0} />
       )}
 
+      {tab === "lessons" && (
+        <LessonsView editing={editing} setEditing={setEditing} creating={creating} setCreating={setCreating} />
+      )}
+
       {(Object.keys(KIND_TABLE) as StudioKind[]).includes(tab as StudioKind) && (
         <KindSection
           kind={tab as StudioKind}
@@ -179,7 +189,6 @@ export default function Studio() {
 
       {tab === "students" && <Students />}
       {tab === "analytics" && <Analytics />}
-      {tab === "revenue" && <Revenue />}
     </Page>
   );
 }
@@ -243,6 +252,7 @@ function KindSection({
     sessionToken ? { sessionToken, kind } : "skip"
   );
   const transition = useMutation(api.studioWire.transitionStudioItem);
+  const del = useMutation(api.studioWire.deleteStudioItem);
 
   const list: StudioItem[] =
     items && typeof items === "object" && "ok" in items && items.ok ? (items.items as unknown as StudioItem[]) : [];
@@ -252,6 +262,17 @@ function KindSection({
     try {
       const res = await transition({ sessionToken, kind, itemId, action });
       if (res?.ok) toast(t(action === "publish" ? "studio.published_toast" : "studio.unpublished_toast"));
+      else if (res && "error" in res) toast(t(`studio.err.${res.error}` as TKey));
+    } catch {
+      toast(t("studio.err.network"));
+    }
+  };
+
+  const doDelete = async (itemId: string) => {
+    if (!sessionToken || !window.confirm(t("studio.deleteConfirm"))) return;
+    try {
+      const res = await del({ sessionToken, kind, itemId });
+      if (res?.ok) toast(t("studio.deleted_toast"));
       else if (res && "error" in res) toast(t(`studio.err.${res.error}` as TKey));
     } catch {
       toast(t("studio.err.network"));
@@ -280,9 +301,10 @@ function KindSection({
                 <div style={{ minWidth: 0 }}>
                   <strong style={{ fontFamily: "Sora" }}>{it.title}</strong>
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {it.style} · <LevelBadge level={it.difficulty.charAt(0).toUpperCase() + it.difficulty.slice(1)} /> · {fmtDur(it.durationSec)} · {t(ACCESS_KEY[accessModelOf({ priceCents: it.priceCents, creditPrice: it.creditPrice })])}
-                    {it.priceCents > 0 ? ` · ${fmtEur(it.priceCents)}` : ""}
-                    {it.creditPrice > 0 ? ` · ${it.creditPrice}💎` : ""}
+                    {it.style} · <LevelBadge level={it.difficulty.charAt(0).toUpperCase() + it.difficulty.slice(1)} /> · {fmtDur(it.durationSec)}
+                    {" · ✦ "}{t("learn.access.free")}
+                    {it.videoRef ? " · 🎬" : ""}
+                    {it.steps.length > 0 ? ` · 📑 ${it.steps.length}` : ""}
                   </div>
                 </div>
                 <StatusBadge status={it.status} />
@@ -296,6 +318,7 @@ function KindSection({
                   <button className="btn btn-sm" onClick={() => doTransition(it.id, "unpublish")}>{t("studio.unpublish")}</button>
                 )}
                 <button className="btn btn-sm" onClick={() => { setEditing(it); setCreating(null); }}>{t("studio.edit")}</button>
+                <button className="btn btn-sm btn-danger" onClick={() => doDelete(it.id)}>{t("studio.delete")}</button>
                 {kind === "course" && it.status !== "draft" && (
                   <button className="btn btn-sm" onClick={() => setLessonsFor(lessonsFor === it.id ? null : it.id)}>
                     🎬 {t("studio.lessons.manage")}
@@ -322,8 +345,42 @@ function StatusBadge({ status }: { status: StudioStatus }) {
   );
 }
 
+/* ---------------- Day 23 — upload stage + error labels (bilingual) ---------------- */
+
+const uploadStageLabel = (s: UploadStage, lang: "en" | "sq"): string => {
+  switch (s.stage) {
+    case "preparing":
+      return tx({ en: "Preparing upload…", sq: "Përgatitja e ngarkimit…" }, lang);
+    case "uploading":
+      return tx({ en: `Uploading video… ${s.percent}%`, sq: `Ngarkimi i videos… ${s.percent}%` }, lang);
+    case "processing":
+      return tx({ en: "Processing…", sq: "Përpunimi…" }, lang);
+    case "thumbnail":
+      return tx({ en: `Capturing thumbnail… ${s.percent}%`, sq: `Kapja e miniaturës… ${s.percent}%` }, lang);
+    case "done":
+      return tx({ en: "Upload complete — ready to publish", sq: "Ngarkimi përfundoi — gati për publikim" }, lang);
+    default:
+      return "";
+  }
+};
+
+const uploadErrorLabel = (code: UploadErrorCode, lang: "en" | "sq"): string => {
+  const map: Partial<Record<UploadErrorCode, { en: string; sq: string }>> = {
+    unsupported_type: { en: "That file type isn't supported. Use MP4, MOV or WebM.", sq: "Ky lloj skedari nuk mbështetet. Përdor MP4, MOV ose WebM." },
+    too_large: { en: "The video is too large (max 512 MB).", sq: "Videoja është shumë e madhe (maks. 512 MB)." },
+    invalid_duration: { en: "Videos must be between 1 second and 10 minutes.", sq: "Videot duhet të jenë nga 1 sekonda deri në 10 minuta." },
+    too_many_pending: { en: "You have too many uploads in progress.", sq: "Ke shumë ngarkime në rrugë." },
+    upload_window_expired: { en: "The upload session expired — try again.", sq: "Seanca e ngarkimit skadoi — provo përsëri." },
+    blob_missing: { en: "The upload didn't reach storage. Retry.", sq: "Ngarkimi nuk arriti në ruajtje. Provo përsëri." },
+    network: { en: "Network interrupted. Retry.", sq: "Rrjeti u ndërpre. Provo përsëri." },
+    aborted: { en: "Upload cancelled.", sq: "Ngarkimi u anulua." },
+    unauthenticated: { en: "Sign in to upload videos.", sq: "Hyr në llogari për të ngarkuar video." },
+  };
+  return tx(map[code] ?? { en: "Upload failed. Please try again.", sq: "Ngarkimi dështoi. Provo përsëri." }, lang);
+};
+
 function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: StudioItem; onDone: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const { sessionToken } = useAuth();
   const { toast } = useStore();
 
@@ -332,12 +389,21 @@ function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: Stu
   const [style, setStyle] = useState(existing?.style ?? STYLES[0]);
   const [difficulty, setDifficulty] = useState<StudioDifficulty>((existing?.difficulty as StudioDifficulty) ?? "beginner");
   const [minutes, setMinutes] = useState(Math.max(1, Math.round((existing?.durationSec ?? 300) / 60)));
-  const [priceEur, setPriceEur] = useState(existing?.priceCents ? (existing.priceCents / 100).toFixed(2) : "0");
-  const [credits, setCredits] = useState(String(existing?.creditPrice ?? 0));
   const [tags, setTags] = useState(existing?.tags.join(", ") ?? "");
   const [visibility, setVisibility] = useState<StudioVisibility>((existing?.visibility as StudioVisibility) ?? "public");
   const [deadline, setDeadline] = useState(existing?.deadlineAt ? new Date(existing.deadlineAt).toISOString().slice(0, 10) : "");
   const [busy, setBusy] = useState(false);
+
+  // Day 23 — real video upload through the Day 4 pipeline (Draft → uploading
+  // → processing → ready), with preview-before-publish.
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [durSec, setDurSec] = useState(0);
+  const [uploadStage, setUploadStage] = useState<UploadStage>({ stage: "idle" });
+  const [videoRef, setVideoRef] = useState<string | undefined>(existing?.videoRef);
+  // Day 23 — movement timestamps for class tutorials (Practice Mode seeks).
+  const [steps, setSteps] = useState<StepDraft[]>(existing?.steps ?? []);
 
   const create = useMutation(api.studioWire.createStudioItem);
   const update = useMutation(api.studioWire.updateStudioItem);
@@ -349,23 +415,66 @@ function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: Stu
   const moveOptions: StudioItem[] =
     myMoves && typeof myMoves === "object" && "ok" in myMoves && myMoves.ok ? (myMoves.items as unknown as StudioItem[]) : [];
   const [comboMoveIds, setComboMoveIds] = useState<string[]>([]);
+  const convex = useConvex();
 
-  const priceCents = Math.round(parseFloat(priceEur || "0") * 100);
-  const creditPrice = Math.max(0, Math.round(parseFloat(credits || "0")));
+  // Media resource cleanup: revoke the local preview URL when replaced.
+  useEffect(() => () => {
+    if (fileUrl) URL.revokeObjectURL(fileUrl);
+  }, [fileUrl]);
+
+  const onPickFile = async (f: File | null) => {
+    setUploadStage({ stage: "idle" });
+    if (!f) return;
+    const pre = precheckVideoFile(f);
+    if (pre) {
+      setUploadStage({ stage: "failed", error: pre });
+      return;
+    }
+    const dur = await probeVideoDuration(f);
+    if (dur < 1) {
+      setUploadStage({ stage: "failed", error: "invalid_duration" });
+      return;
+    }
+    setDurSec(dur);
+    setFile(f);
+    setFileUrl(URL.createObjectURL(f));
+  };
+
+  const startUpload = () => {
+    if (!file || !sessionToken || uploadStage.stage === "uploading" || uploadStage.stage === "processing") return;
+    void uploadDanceVideo({
+      sessionToken,
+      file,
+      durationSec: Math.round(durSec),
+      onStage: (s) => {
+        setUploadStage(s);
+        if (s.stage === "done") setVideoRef(s.videoId);
+      },
+      callMutation: (ref, args) => convex.mutation(ref as never, args as never) as never,
+    });
+  };
 
   const submit = async () => {
     if (!sessionToken) return;
     setBusy(true);
+    // Day 23 — always free. Movement timestamps are validated + sorted here
+    // and re-validated server-side (normalizeSteps).
+    const cleanSteps = steps
+      .map((s) => ({ label: String(s.label ?? "").trim(), atSec: Number(s.atSec) }))
+      .filter((s) => s.label.length > 0 && Number.isFinite(s.atSec) && s.atSec >= 0)
+      .sort((a, b) => a.atSec - b.atSec);
     const base = {
       title: title.trim(),
       description,
       style,
       difficulty,
       durationSec: Math.round(minutes * 60),
-      priceCents,
-      creditPrice,
+      priceCents: 0,
+      creditPrice: 0,
       tags: tags.split(",").map((s) => s.trim().replace(/^#/, "")).filter(Boolean),
       visibility,
+      videoRef,
+      ...(kind === "class" ? { steps: cleanSteps } : {}),
       ...(kind === "challenge" && deadline ? { deadlineAt: new Date(deadline + "T23:59:59").getTime() } : {}),
     };
     try {
@@ -430,16 +539,8 @@ function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: Stu
             <option value="private">Private</option>
           </select>
         </div>
-        <div>
-          <label className="input-label">{t("studio.f.price")}</label>
-          <input className="input" type="number" min={0} max={30} step="0.5" value={priceEur} onChange={(e) => setPriceEur(e.target.value)} />
-        </div>
-        <div>
-          <label className="input-label">{t("studio.f.credits")}</label>
-          <input className="input" type="number" min={0} max={500} step={5} value={credits} onChange={(e) => setCredits(e.target.value)} />
-        </div>
       </div>
-      <span className="muted" style={{ fontSize: 12 }}>{t("studio.f.credits_hint")}</span>
+      <span className="muted" style={{ fontSize: 12 }}>✦ {t("studio.freePlatform")}</span>
 
       <div>
         <label className="input-label">{t("studio.f.tags")}</label>
@@ -475,12 +576,89 @@ function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: Stu
         </div>
       )}
 
-      <div className="panel" style={{ padding: 12 }}>
+      {/* Day 23 — real upload through the Day 4 pipeline + preview */}
+      <div className="panel" style={{ padding: 12, display: "grid", gap: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 700 }}>🎬 {t("studio.f.video")}</span>
-        <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-          {t("studio.f.video_none")} ({t("studio.f.thumbnail")}: Day 4 upload pipeline)
-        </p>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="video/mp4,video/quicktime,video/webm"
+          style={{ display: "none" }}
+          onChange={(e) => void onPickFile(e.target.files?.[0] ?? null)}
+        />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn btn-sm" onClick={() => fileInput.current?.click()}>
+            {videoRef || file ? t("studio.f.videoChange") : t("studio.f.videoPick")}
+          </button>
+          {file && !videoRef && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={startUpload}
+              disabled={uploadStage.stage === "uploading" || uploadStage.stage === "processing"}
+            >
+              ⬆️ {tx({ en: "Upload", sq: "Ngarko" }, lang)}
+            </button>
+          )}
+          {videoRef && uploadStage.stage === "done" && (
+            <span className="chip" style={{ fontSize: 11 }}>✅ {tx({ en: "Video attached", sq: "Video e bashkangjitur" }, lang)}</span>
+          )}
+        </div>
+        {uploadStage.stage !== "idle" && (
+          <p className="muted" style={{ fontSize: 12, margin: 0 }} role={uploadStage.stage === "failed" ? "alert" : "status"}>
+            {uploadStage.stage === "failed" ? `⚠ ${uploadErrorLabel(uploadStage.error, lang)}` : uploadStageLabel(uploadStage, lang)}
+          </p>
+        )}
+        {(fileUrl || existing?.videoUrl) && (
+          <div>
+            <span className="faint" style={{ fontSize: 11.5 }}>👁 {t("studio.f.preview")}</span>
+            <video
+              key={fileUrl ?? existing?.videoUrl}
+              src={fileUrl ?? existing?.videoUrl}
+              controls
+              playsInline
+              style={{ width: "100%", maxWidth: 340, borderRadius: 12, marginTop: 6, display: "block", background: "#000" }}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Day 23 — movement timestamps (class tutorials) */}
+      {kind === "class" && (
+        <div>
+          <label className="input-label">📑 {t("studio.f.steps")}</label>
+          {steps.map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                value={s.label}
+                placeholder={t("studio.f.stepLabel")}
+                maxLength={120}
+                onChange={(e) => setSteps((rows) => rows.map((r, j) => (j === i ? { ...r, label: e.target.value } : r)))}
+              />
+              <input
+                className="input"
+                style={{ width: 96 }}
+                type="number"
+                min={0}
+                step={0.5}
+                value={s.atSec}
+                aria-label={t("studio.f.stepAt")}
+                onChange={(e) => setSteps((rows) => rows.map((r, j) => (j === i ? { ...r, atSec: Number(e.target.value) } : r)))}
+              />
+              <button className="btn btn-sm" aria-label={t("player.clear")} onClick={() => setSteps((rows) => rows.filter((_, j) => j !== i))}>
+                ✕
+              </button>
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button className="btn btn-sm" disabled={steps.length >= 40} onClick={() => setSteps((rows) => [...rows, { label: "", atSec: 0 }])}>
+              {t("studio.f.stepAdd")}
+            </button>
+          </div>
+          <p className="faint" style={{ fontSize: 11.5, margin: "6px 0 0" }}>{t("studio.f.stepsHint")}</p>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button className="btn btn-primary" disabled={busy || title.trim().length < 3} onClick={submit}>
@@ -488,6 +666,121 @@ function ItemForm({ kind, existing, onDone }: { kind: StudioKind; existing?: Stu
         </button>
         <button className="btn" onClick={onDone}>{t("studio.cancel")}</button>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Day 23 — My Lessons: merged classes + courses ---------------- */
+
+/**
+ * The Teacher Mode "My Lessons" tab: every class and course the teacher owns
+ * in one list with publish/unpublish, edit, delete and the course lesson
+ * manager. Ownership is re-checked server-side on every action.
+ */
+function LessonsView({
+  editing,
+  setEditing,
+  creating,
+  setCreating,
+}: {
+  editing: StudioItem | null;
+  setEditing: (i: StudioItem | null) => void;
+  creating: StudioKind | null;
+  setCreating: (k: StudioKind | null) => void;
+}) {
+  const { t } = useT();
+  const { sessionToken } = useAuth();
+  const { toast } = useStore();
+  const [managing, setManaging] = useState<string | null>(null);
+
+  const items = useQuery(api.studioWire.listMyItems, sessionToken ? { sessionToken } : "skip");
+  const transition = useMutation(api.studioWire.transitionStudioItem);
+  const del = useMutation(api.studioWire.deleteStudioItem);
+
+  const all: StudioItem[] =
+    items && typeof items === "object" && "ok" in items && items.ok ? (items.items as unknown as StudioItem[]) : [];
+  const lessons = all
+    .filter((i) => i.kind === "class" || i.kind === "course")
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+
+  const doTransition = async (item: StudioItem, action: "publish" | "unpublish") => {
+    if (!sessionToken) return;
+    try {
+      const res = await transition({ sessionToken, kind: item.kind, itemId: item.id, action });
+      if (res?.ok) toast(t(action === "publish" ? "studio.published_toast" : "studio.unpublished_toast"));
+      else if (res && "error" in res) toast(t(`studio.err.${res.error}` as TKey));
+    } catch {
+      toast(t("studio.err.network"));
+    }
+  };
+
+  const doDelete = async (item: StudioItem) => {
+    if (!sessionToken || !window.confirm(t("studio.deleteConfirm"))) return;
+    try {
+      const res = await del({ sessionToken, kind: item.kind, itemId: item.id });
+      if (res?.ok) toast(t("studio.deleted_toast"));
+      else if (res && "error" in res) toast(t(`studio.err.${res.error}` as TKey));
+    } catch {
+      toast(t("studio.err.network"));
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0, fontFamily: "Sora", fontSize: 20, fontWeight: 800 }}>{t("studio.lessonsView")}</h2>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={() => { setCreating("class"); setEditing(null); }}>
+            + {t("studio.tab.classes")}
+          </button>
+          <button className="btn btn-sm" onClick={() => { setCreating("course"); setEditing(null); }}>
+            + {t("studio.tab.courses")}
+          </button>
+        </div>
+      </div>
+
+      {creating === "class" && <ItemForm kind="class" onDone={() => setCreating(null)} />}
+      {creating === "course" && <ItemForm kind="course" onDone={() => setCreating(null)} />}
+      {editing && <ItemForm kind={editing.kind} existing={editing} onDone={() => setEditing(null)} />}
+
+      {lessons.length === 0 ? (
+        <Empty icon="🗂️" text={t("studio.empty")} />
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {lessons.map((it) => (
+            <div key={it.id} className="panel panel-hover" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ fontFamily: "Sora" }}>{it.title}</strong>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    {it.kind === "class" ? t("studio.tab.classes") : t("studio.tab.courses")} · {it.style} ·{" "}
+                    <LevelBadge level={it.difficulty.charAt(0).toUpperCase() + it.difficulty.slice(1)} /> · {fmtDur(it.durationSec)}
+                    {it.videoRef ? " · 🎬" : ""}
+                    {it.steps.length > 0 ? ` · 📑 ${it.steps.length}` : ""}
+                  </div>
+                </div>
+                <StatusBadge status={it.status} />
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {it.status !== "published" && (
+                  <button className="btn btn-primary btn-sm" onClick={() => doTransition(it, "publish")}>{t("studio.publish")}</button>
+                )}
+                {it.status === "published" && (
+                  <button className="btn btn-sm" onClick={() => doTransition(it, "unpublish")}>{t("studio.unpublish")}</button>
+                )}
+                <button className="btn btn-sm" onClick={() => { setEditing(it); setCreating(null); }}>{t("studio.edit")}</button>
+                <button className="btn btn-sm btn-danger" onClick={() => doDelete(it)}>{t("studio.delete")}</button>
+                {it.kind === "course" && it.status !== "draft" && (
+                  <button className="btn btn-sm" onClick={() => setManaging(managing === it.id ? null : it.id)}>
+                    🎬 {t("studio.lessons.manage")}
+                  </button>
+                )}
+              </div>
+              {it.kind === "course" && managing === it.id && <CourseLessonManager courseId={it.id} />}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -608,7 +901,7 @@ function Students() {
         <StatCard icon="🧑‍🎓" value={students} label={t("studio.stat.students")} accent />
       </div>
       <p className="muted" style={{ fontSize: 13 }}>
-        {t("studio.revenue.note")}
+        {t("studio.catalog_note")}
       </p>
     </div>
   );
@@ -632,73 +925,3 @@ function Analytics() {
   );
 }
 
-function Revenue() {
-  const { t } = useT();
-  const { sessionToken } = useAuth();
-  const data = useQuery(api.studioWire.getRevenue, sessionToken ? { sessionToken } : "skip");
-  // Day 14 — the teacher's REAL money view: verified provider transactions
-  // only (charges minus refunds). Accruals below remain the payout truth.
-  const verified = useQuery(api.paymentsWire.getMyRevenue, sessionToken ? { sessionToken } : "skip");
-  const vok = verified && "ok" in verified && verified.ok;
-  const [amount, setAmount] = useState("10.00");
-  const preview = useQuery(
-    api.studioWire.previewSplit,
-    sessionToken ? { sessionToken, amountCents: Math.round(parseFloat(amount || "0") * 100) } : "skip"
-  );
-  const ok = data && "ok" in data && data.ok;
-  const money = (c: number) => `€${(c / 100).toFixed(2)}`;
-  return (
-    <div style={{ display: "grid", gap: 14 }}>
-      {/* Day 14 — verified payments (provider-confirmed transactions only) */}
-      <div className="panel" style={{ padding: 14, display: "grid", gap: 8 }}>
-        <strong style={{ fontFamily: "Sora" }}>💳 {t("studio.payments.title")}</strong>
-        {vok ? (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
-              <StatCard icon="💰" value={money(verified.chargesCents)} label={t("studio.payments.charges")} accent />
-              <StatCard icon="↩️" value={money(verified.refundedCents)} label={t("studio.payments.refunded")} />
-              <StatCard icon="📊" value={money(verified.netCents)} label={t("studio.payments.net")} />
-            </div>
-            <p className="faint" style={{ fontSize: 12, margin: 0 }}>
-              {verified.transactionCount} {t("studio.payments.txs")} · {t("studio.payments.note")}
-            </p>
-          </>
-        ) : (
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>{t("studio.payments.empty")}</p>
-        )}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-        <StatCard icon={ok ? `(${data.sharePct}%)` : "…"} value={ok ? money(data.accruingCents) : "—"} label={t("studio.revenue.accruing")} accent />
-        <StatCard icon="🏦" value={ok ? money(data.scheduledCents) : "—"} label={t("studio.revenue.scheduled")} />
-        <StatCard icon="✅" value={ok ? money(data.paidCents) : "—"} label={t("studio.revenue.paid")} />
-      </div>
-
-      {ok && data.payouts.length > 0 ? (
-        <div style={{ display: "grid", gap: 8 }}>
-          {data.payouts.map((p) => (
-            <div key={p.id} className="panel" style={{ padding: 12, display: "flex", justifyContent: "space-between" }}>
-              <span>{new Date(p.periodStart).toLocaleDateString()} – {new Date(p.periodEnd).toLocaleDateString()}</span>
-              <strong style={{ fontFamily: "Sora" }}>{money(p.amountCents)}</strong>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="muted" style={{ fontSize: 13 }}>{t("studio.revenue.empty")}</p>
-      )}
-
-      <div className="panel" style={{ padding: 14, display: "grid", gap: 8 }}>
-        <strong style={{ fontFamily: "Sora" }}>{t("studio.revenue.preview")}</strong>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <input className="input" style={{ maxWidth: 140 }} type="number" min={0} step="0.5" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <span className="muted" style={{ fontSize: 13 }}>
-            {preview && "ok" in preview && preview.ok
-              ? `${t("studio.revenue.share")}: ${preview.sharePct}% → ${money(preview.teacherCents)} / ${money(preview.platformCents)}`
-              : "…"}
-          </span>
-        </div>
-        <p className="muted" style={{ margin: 0, fontSize: 12 }}>{t("studio.revenue.note")}</p>
-      </div>
-    </div>
-  );
-}

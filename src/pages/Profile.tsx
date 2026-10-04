@@ -114,14 +114,16 @@ function ProfileHeader({ userId }: { userId: string }) {
           <Stat v={u.teacher ? "12" : "4"} label={t("profile.courses")} />
         </div>
 
+        {isMe && <ModeSelector />}
+
         <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
           {isMe ? (
             <>
               <button className="btn btn-sm" onClick={() => nav("/account")}>
-                🪙 {t("account.credits")}
+                <IcSettings size={16} /> {t("account.title")}
               </button>
               <button className="btn btn-sm" onClick={() => nav("/settings")}>
-                <IcSettings size={16} /> {t("profile.settings")}
+                {t("profile.settings")}
               </button>
               <button className="btn btn-primary btn-sm" onClick={() => nav("/create")}>
                 ➕ {t("create.title")}
@@ -189,6 +191,52 @@ const profileCover = (id: string) =>
     u_luan: IMG.extra19,
     u_arben: IMG.catLatin,
   })[id] ?? IMG.extra7;
+
+/* ---------------- Day 23 — Dancer / Teacher mode selector ---------------- */
+
+/**
+ * The easy-to-find mode switch. Dancer Mode is for everyone; Teacher Mode
+ * unlocks only for VERIFIED teachers (role comes from the server session —
+ * this switch never grants the role, it only reveals the existing one).
+ */
+export function ModeSelector() {
+  const { t, settings, setSettings } = useStore();
+  const { viewer } = useAuth();
+  const canTeach = viewer?.role === "teacher" || viewer?.role === "admin";
+  const mode = settings.mode === "teacher" && canTeach ? "teacher" : "dancer";
+  return (
+    <div className="panel" style={{ padding: 14, marginBottom: 16, borderColor: "var(--gold-line)" }}>
+      <span className="eyebrow" style={{ display: "block", marginBottom: 8 }}>{t("mode.title")}</span>
+      <div role="radiogroup" aria-label={t("mode.title")} style={{ display: "flex", gap: 8 }}>
+        <button
+          role="radio"
+          aria-checked={mode === "dancer"}
+          className={`chip ${mode === "dancer" ? "active" : ""}`}
+          style={{ flex: 1, padding: "10px 8px", cursor: "pointer" }}
+          onClick={() => setSettings({ mode: "dancer" })}
+        >
+          🩰 {t("mode.dancer")}
+        </button>
+        <button
+          role="radio"
+          aria-checked={mode === "teacher"}
+          className={`chip ${mode === "teacher" ? "active" : ""}`}
+          style={{ flex: 1, padding: "10px 8px", cursor: canTeach ? "pointer" : "not-allowed", opacity: canTeach ? 1 : 0.55 }}
+          aria-disabled={!canTeach}
+          title={canTeach ? undefined : t("mode.teacherLocked")}
+          onClick={() => {
+            if (canTeach) setSettings({ mode: "teacher" });
+          }}
+        >
+          🎓 {t("mode.teacher")}
+        </button>
+      </div>
+      <p className="faint" style={{ fontSize: 11.5, margin: "8px 0 0" }}>
+        {mode === "dancer" ? (canTeach ? t("mode.dancerSub") : t("mode.teacherLocked")) : t("mode.teacherSub")}
+      </p>
+    </div>
+  );
+}
 
 /* ---------------- generic user profile ---------------- */
 /**

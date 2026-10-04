@@ -10,10 +10,13 @@
  *    revoked all fail closed. Admin role comes from `users.role` — never from
  *    the client.
  *  - DRAFT → PUBLISHED → UNPUBLISHED lifecycle. Only the owner or an
- *    authorized admin may edit/transition an item. No exceptions.
- *  - Revenue is REAL architecture with NO fake numbers: purchases accrue via
- *    `teacherPayouts` (status "accruing") using the teacher's contract share;
- *    settlement is provider-gated. Nothing here invents money.
+ *    authorized admin may edit/transition/delete an item. No exceptions.
+ *  - Day 23 — the platform is FREE: the wire layer coerces every new/updated
+ *    item to priceCents 0 / creditPrice 0, so no paid content can be created
+ *    anymore. Legacy price fields on old rows stay as historical data and no
+ *    longer gate anything (the purchase path was removed with it).
+ *  - Revenue functions below remain as payout architecture documentation;
+ *    with no purchase path they can never accrue new rows.
  */
 import { accessModelOf, validateClassPricing, type AccessModel } from "./learning";
 
@@ -112,6 +115,50 @@ export function decideStudioEdit(caller: StudioCaller | null, ownerId: string): 
   }
   if (caller.userId !== ownerId && caller.role !== "admin") return { ok: false, error: "not_owner" };
   return { ok: true };
+}
+
+/* ---------------- item deletion (Day 23) ---------------- */
+
+/**
+ * Deleting a studio item uses the SAME ownership rule as editing: only the
+ * owner or an authorized admin may delete. Reusing `decideStudioEdit` keeps
+ * one tested ownership decision for every destructive write.
+ */
+export const decideStudioDelete = decideStudioEdit;
+
+/* ---------------- movement steps (teacher timestamps, Day 23) ---------------- */
+
+export interface StepInput {
+  label: string;
+  atSec: number;
+}
+
+export const MAX_STEPS = 40;
+export const MAX_STEP_LABEL = 120;
+export const MAX_STEP_SEC = 24 * 3600;
+
+export type StepsValidation =
+  | { ok: true; steps: StepInput[] }
+  | { ok: false; error: "too_many_steps" | "step_label" | "step_time" };
+
+/**
+ * Validate + normalize a teacher's movement timestamps: trim labels, drop
+ * empty rows, sort chronologically. Pure — the wire re-runs it on every
+ * create/update so the player can trust the stored order.
+ */
+export function normalizeSteps(steps: StepInput[] | undefined | null): StepsValidation {
+  if (!steps || steps.length === 0) return { ok: true, steps: [] };
+  if (steps.length > MAX_STEPS) return { ok: false, error: "too_many_steps" };
+  const out: StepInput[] = [];
+  for (const s of steps) {
+    const label = typeof s?.label === "string" ? s.label.trim() : "";
+    if (label.length < 1 || label.length > MAX_STEP_LABEL) return { ok: false, error: "step_label" };
+    const at = Number(s?.atSec);
+    if (!Number.isFinite(at) || at < 0 || at > MAX_STEP_SEC) return { ok: false, error: "step_time" };
+    out.push({ label, atSec: Math.round(at * 10) / 10 });
+  }
+  out.sort((a, b) => a.atSec - b.atSec);
+  return { ok: true, steps: out };
 }
 
 /* ---------------- item validation ---------------- */
